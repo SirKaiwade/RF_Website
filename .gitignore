@@ -21,3 +21,6 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+# Local Nexus data (events, publications, directory JSON)
+data/local/*.json

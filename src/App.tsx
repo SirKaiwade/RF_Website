@@ -1,45 +1,47 @@
-import { Route, Routes } from 'react-router-dom';
-import Navigation from './components/Navigation';
-import Footer from './components/Footer';
-import ScrollToTop from './components/page/ScrollToTop';
+import { lazy, Suspense } from 'react';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import AppShell from './components/AppShell';
+import ProtectedRoute from './components/ProtectedRoute';
 
-import HomePage from './pages/HomePage';
-import AboutPage from './pages/AboutPage';
-import InspirationsPage from './pages/InspirationsPage';
-import InvestedActorsPage from './pages/InvestedActorsPage';
-import TimelinePage from './pages/TimelinePage';
-import PathwaysPage from './pages/PathwaysPage';
-import PathwayStorylinesPage from './pages/PathwayStorylinesPage';
-import EventsPage from './pages/EventsPage';
-import NewsPage from './pages/NewsPage';
-import InsightsPage from './pages/InsightsPage';
-import ContactPage from './pages/ContactPage';
-import NotFoundPage from './pages/NotFoundPage';
+// Route-level code splitting — each page (and its dependencies, e.g. xlsx on
+// the Events/Publications import flow) only downloads once actually visited.
+const ChatPage = lazy(() => import('./components/ChatPage'));
+const LibraryPage = lazy(() => import('./components/LibraryPage'));
+const DirectoryPage = lazy(() => import('./components/DirectoryPage'));
+const EventsPage = lazy(() => import('./components/EventsPage'));
+const PublicationsPage = lazy(() => import('./components/PublicationsPage'));
+const LoginPage = lazy(() => import('./pages/LoginPage'));
 
-function App() {
+function RouteFallback() {
   return (
-    <div style={{ backgroundColor: '#FAFAF7', minHeight: '100vh' }}>
-      <ScrollToTop />
-      <Navigation />
-      <main>
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/about" element={<AboutPage />} />
-          <Route path="/inspirations" element={<InspirationsPage />} />
-          <Route path="/invested-actors" element={<InvestedActorsPage />} />
-          <Route path="/timeline" element={<TimelinePage />} />
-          <Route path="/pathways" element={<PathwaysPage />} />
-          <Route path="/pathway-storylines" element={<PathwayStorylinesPage />} />
-          <Route path="/events" element={<EventsPage />} />
-          <Route path="/news" element={<NewsPage />} />
-          <Route path="/insights" element={<InsightsPage />} />
-          <Route path="/contact" element={<ContactPage />} />
-          <Route path="*" element={<NotFoundPage />} />
-        </Routes>
-      </main>
-      <Footer />
+    <div className="login-loading">
+      <div className="login-loading-bar" />
     </div>
   );
 }
 
-export default App;
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route
+            element={
+              <ProtectedRoute>
+                <AppShell />
+              </ProtectedRoute>
+            }
+          >
+            <Route index element={<ChatPage />} />
+            <Route path="library" element={<LibraryPage />} />
+            <Route path="directory" element={<DirectoryPage />} />
+            <Route path="events" element={<EventsPage />} />
+            <Route path="publications" element={<PublicationsPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Route>
+        </Routes>
+      </Suspense>
+    </BrowserRouter>
+  );
+}
