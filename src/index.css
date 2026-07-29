@@ -1580,6 +1580,174 @@
   }
 }
 
+/* ---------- Records grid (pasteable table editor) ---------- */
+.records-grid {
+  border: 1px solid rgb(var(--rule));
+  border-radius: 2px;
+  background: rgb(var(--surface));
+  outline: none;
+}
+
+.records-grid:focus-visible {
+  box-shadow: 0 0 0 2px rgba(0, 110, 182, 0.25);
+}
+
+.records-grid-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid rgb(var(--rule));
+  background: rgb(var(--surface-muted, 248 250 252));
+}
+
+.records-grid-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: rgb(var(--ink-muted));
+  line-height: 1.4;
+  max-width: 40rem;
+}
+
+.records-grid-flash {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #006eb6;
+}
+
+.records-grid-scroll {
+  overflow: auto;
+  max-height: min(70vh, 720px);
+}
+
+.records-grid-table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.75rem;
+}
+
+.records-grid-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 0.55rem 0.65rem;
+  text-align: left;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: rgb(var(--ink-muted));
+  background: rgb(var(--surface));
+  border-bottom: 1px solid rgb(var(--rule));
+  white-space: nowrap;
+}
+
+.records-grid-table td {
+  padding: 0;
+  border-bottom: 1px solid rgb(var(--rule));
+  border-right: 1px solid rgb(var(--rule));
+  vertical-align: top;
+  background: rgb(var(--surface));
+}
+
+.records-grid-table tr:hover td {
+  background: rgba(0, 110, 182, 0.03);
+}
+
+.records-grid-table td.is-editing {
+  background: #fff;
+  box-shadow: inset 0 0 0 2px rgba(0, 110, 182, 0.45);
+}
+
+.records-grid-rownum {
+  width: 2.5rem;
+  min-width: 2.5rem;
+  text-align: right !important;
+  color: rgb(var(--ink-muted));
+  font-variant-numeric: tabular-nums;
+  padding: 0.45rem 0.5rem !important;
+  border-right: 1px solid rgb(var(--rule));
+  background: rgb(var(--surface-muted, 248 250 252)) !important;
+  position: sticky;
+  left: 0;
+  z-index: 1;
+}
+
+.records-grid-table th.records-grid-rownum {
+  z-index: 3;
+}
+
+.records-grid-actions {
+  width: 2.25rem;
+  min-width: 2.25rem;
+  border-right: none !important;
+  text-align: center;
+  padding: 0.25rem !important;
+}
+
+.records-grid-cell {
+  display: block;
+  width: 100%;
+  min-height: 2rem;
+  padding: 0.45rem 0.65rem;
+  text-align: left;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: rgb(var(--ink));
+  background: transparent;
+  border: none;
+  cursor: text;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.records-grid-input {
+  display: block;
+  width: 100%;
+  min-height: 2rem;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: rgb(var(--ink));
+  background: #fff;
+  border: none;
+  outline: none;
+}
+
+.records-grid-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  color: rgb(var(--ink-muted));
+  border-radius: 2px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.records-grid-delete:hover {
+  color: #b91c1c;
+  background: #fef2f2;
+}
+
+.records-grid-empty {
+  padding: 2.5rem 1rem !important;
+  text-align: center;
+  color: rgb(var(--ink-muted));
+  font-size: 0.8125rem;
+  border-right: none !important;
+}
+
+.publication-type-key summary::-webkit-details-marker {
+  display: none;
+}
+
 /* ---------- Login page ---------- */
 .login-page {
   min-height: 100vh;

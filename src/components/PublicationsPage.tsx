@@ -1,66 +1,33 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
-import {
-  BookOpen,
-  X,
-  ExternalLink,
-  Link as LinkIcon,
-  MessageSquare,
-  Users,
-  Layers,
-  Target,
-  Building2,
-  Globe2,
-  FileText,
-  Plus,
-  Pencil,
-  Trash2,
-} from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { useOutletContext } from 'react-router-dom';
+import { BookOpen, ChevronDown } from 'lucide-react';
 import type { Publication } from '../types';
 import {
-  formatAuthors,
-  getPublication,
   PUBLICATION_TYPE_DEFINITIONS,
+  PUBLICATION_TYPES,
   publicationsStore,
 } from '../data/publications';
+import {
+  emptyPublicationRow,
+  publicationGridColumns,
+  publicationsFromClipboard,
+  publicationsToTsv,
+} from '../lib/publicationsGrid';
+import RecordsGrid from './RecordsGrid';
 import SpreadsheetImport from './SpreadsheetImport';
-import PublicationEditor from './PublicationEditor';
 import { useLocalDataInfo } from '../lib/localDataSync';
-import { classNames, formatDate } from '../lib/format';
+import { classNames } from '../lib/format';
 import type { ShellContext } from './AppShell';
-import { EmptyState, FilterChip, MetaSummary, PageHeader, SearchField } from './ui';
-
-const TYPE_CHIP_COLORS = ['chip-blue', 'chip-green', 'chip-amber', 'chip-teal', 'chip-red'];
-
-function typeChipClass(type: string | null, types: string[]): string {
-  if (!type) return 'chip-gray';
-  const i = types.indexOf(type);
-  return i === -1 ? 'chip-gray' : TYPE_CHIP_COLORS[i % TYPE_CHIP_COLORS.length];
-}
+import { FilterChip, MetaSummary, PageHeader, SearchField } from './ui';
 
 export default function PublicationsPage() {
   const ctx = useOutletContext<ShellContext>();
-  const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   const publications = publicationsStore.use();
+  const dataInfo = useLocalDataInfo();
 
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [wpFilter, setWpFilter] = useState<string>('all');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [editing, setEditing] = useState<Publication | null>(null);
-
-  const dataInfo = useLocalDataInfo();
-
-  // Deep link from citations: /publications?open=<id>
-  useEffect(() => {
-    const open = searchParams.get('open');
-    if (open) {
-      setSelectedId(open);
-      setSearchParams({}, { replace: true });
-    }
-  }, [searchParams, setSearchParams]);
 
   const types = useMemo(() => {
     const counts = new Map<string, number>();
@@ -69,8 +36,6 @@ export default function PublicationsPage() {
     }
     return [...counts.entries()].sort((a, b) => b[1] - a[1]);
   }, [publications]);
-
-  const typeNames = useMemo(() => types.map(([t]) => t), [types]);
 
   const workPackages = useMemo(() => {
     const set = new Set<string>();
@@ -95,36 +60,24 @@ export default function PublicationsPage() {
           .filter(Boolean)
           .some((v) => v!.toLowerCase().includes(q));
       })
-      .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? ''));
+      .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '') || a.title.localeCompare(b.title));
   }, [publications, query, typeFilter, wpFilter]);
 
-  const selected = selectedId ? getPublication(selectedId) ?? null : null;
-
-  function askNexusAbout(p: Publication) {
-    ctx.sendMessage(`What do we know about the publication "${p.title}"?`);
-    navigate('/');
+  // When filters are active, edit the filtered view but write through by id.
+  function updateRow(row: Publication) {
+    publicationsStore.update(row);
   }
 
-  function openAdd() {
-    setEditing(null);
-    setEditorOpen(true);
+  function replaceAll(rows: Publication[]) {
+    publicationsStore.hydrate(rows);
   }
 
-  function openEdit(p: Publication) {
-    setEditing(p);
-    setEditorOpen(true);
+  function addRow() {
+    publicationsStore.add(emptyPublicationRow());
   }
 
-  function savePublication(record: Publication) {
-    if (editing) publicationsStore.update(record);
-    else publicationsStore.add(record);
-    setSelectedId(record.id);
-  }
-
-  function deletePublication(p: Publication) {
-    if (!window.confirm(`Delete "${p.title}"? This cannot be undone.`)) return;
-    publicationsStore.remove(p.id);
-    setSelectedId(null);
+  function deleteRow(id: string) {
+    publicationsStore.remove(id);
   }
 
   return (
@@ -137,29 +90,16 @@ export default function PublicationsPage() {
       <PageHeader
         icon={BookOpen}
         title="Publications"
-        subtitle={`2026 publication mastersheet · ${publications.length} outputs${dataInfo.label ? ` · ${dataInfo.label}` : ''}`}
+        subtitle={`Editable mastersheet · ${publications.length} outputs${dataInfo.label ? ` · ${dataInfo.label}` : ''}`}
         search={
           <SearchField
             value={query}
             onChange={setQuery}
-            placeholder="Search publications…"
+            placeholder="Filter rows…"
             className="hidden sm:block"
           />
         }
-        actions={
-          <>
-            <button
-              type="button"
-              onClick={openAdd}
-              className="btn btn-secondary btn-sm"
-              title="Add a publication"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add
-            </button>
-            <SpreadsheetImport kind="publications" />
-          </>
-        }
+        actions={<SpreadsheetImport kind="publications" />}
       />
 
       <div className="toolbar">
@@ -196,270 +136,83 @@ export default function PublicationsPage() {
         </select>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-5xl mx-auto px-5 lg:px-8 py-6 lg:py-8">
+      <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="max-w-[1600px] mx-auto px-5 lg:px-8 py-5 lg:py-6 space-y-4">
           <SearchField
             value={query}
             onChange={setQuery}
-            placeholder="Search publications…"
-            className="sm:hidden mb-4 max-w-none"
+            placeholder="Filter rows…"
+            className="sm:hidden max-w-none"
           />
 
           <MetaSummary
             items={[
-              { label: 'outputs in 2026', value: stats.total },
+              { label: 'outputs', value: stats.total },
               { label: 'journal articles', value: stats.peerReviewed },
               { label: 'with link / DOI', value: stats.withLink },
             ]}
           />
 
-          {publications.length === 0 ? (
-            <EmptyState
-              icon={BookOpen}
-              title="No publications yet"
-              description="Import the publication mastersheet or add outputs manually. Nexus uses this catalog to answer questions about what UNU Global Health has published."
-              action={
-                <button type="button" onClick={openAdd} className="btn btn-primary btn-sm">
-                  <Plus className="w-3.5 h-3.5" />
-                  Add a publication
-                </button>
-              }
-            />
-          ) : filtered.length === 0 ? (
-            <div className="text-center text-[13px] text-gray-500 py-16 border border-dashed border-rule rounded-sm">
-              {query.trim()
-                ? `No publications match "${query}" with these filters.`
-                : 'No publications match these filters.'}
-            </div>
-          ) : (
-            <ul className="border border-rule rounded-sm divide-y divide-rule bg-surface">
-              {filtered.map((p) => (
-                <PublicationRow
-                  key={p.id}
-                  publication={p}
-                  chipClass={typeChipClass(p.type, typeNames)}
-                  active={selectedId === p.id}
-                  onOpen={() => setSelectedId(p.id)}
-                />
-              ))}
-            </ul>
-          )}
+          <PublicationTypeKey />
 
-          <div className="mt-10 text-[11px] text-gray-500 max-w-2xl">
-            Publications feed into Nexus Chat — ask “what have we published on corporate
-            accountability?” or “which outputs target policymakers?” and Nexus answers from
-            this database. Import an updated mastersheet (.xlsx) any time.
-          </div>
+          <RecordsGrid
+            rows={filtered}
+            columns={publicationGridColumns}
+            onReplace={replaceAll}
+            onUpdate={updateRow}
+            onAddRow={addRow}
+            onDeleteRow={deleteRow}
+            parsePaste={publicationsFromClipboard}
+            serializeCopy={publicationsToTsv}
+            emptyLabel="No publications yet — paste your mastersheet here (include the header row), or add a row."
+            pasteHint="Click the table, then paste from Excel/Sheets (with headers). Edit any cell; Copy sends the table back out."
+          />
+
+          {(typeFilter !== 'all' || wpFilter !== 'all' || query.trim()) &&
+            filtered.length !== publications.length && (
+              <p className="text-[11px] text-gray-500">
+                Showing {filtered.length} of {publications.length} rows (filters applied). Paste
+                still replaces the full dataset.
+              </p>
+            )}
         </div>
       </div>
-
-      {selected && (
-        <PublicationDetail
-          publication={selected}
-          chipClass={typeChipClass(selected.type, typeNames)}
-          onClose={() => setSelectedId(null)}
-          onAskNexus={() => askNexusAbout(selected)}
-          onEdit={() => openEdit(selected)}
-          onDelete={() => deletePublication(selected)}
-        />
-      )}
-
-      {editorOpen && (
-        <PublicationEditor
-          initial={editing ?? undefined}
-          onClose={() => setEditorOpen(false)}
-          onSave={savePublication}
-        />
-      )}
     </section>
   );
 }
 
-function PublicationRow({
-  publication: p,
-  chipClass,
-  active,
-  onOpen,
-}: {
-  publication: Publication;
-  chipClass: string;
-  active: boolean;
-  onOpen: () => void;
-}) {
+function PublicationTypeKey() {
   return (
-    <li>
-      <button
-        type="button"
-        onClick={onOpen}
-        className={classNames(
-          'w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-gray-50 transition-colors',
-          active ? 'bg-un-blue-bg/60' : ''
-        )}
-      >
-        <div className="w-8 h-8 rounded-sm bg-un-blue-bg text-un-blue flex items-center justify-center shrink-0 mt-0.5">
-          <FileText className="w-3.5 h-3.5" strokeWidth={1.75} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-semibold text-ink leading-snug line-clamp-2">
-            {p.title}
+    <details className="publication-type-key group border border-rule rounded-sm bg-surface">
+      <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer list-none select-none hover:bg-gray-50">
+        <div className="min-w-0">
+          <div className="text-[12px] font-semibold text-ink tracking-wide uppercase">
+            Publication type key
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-gray-500">
-            {formatAuthors(p) && (
-              <span className="inline-flex items-center gap-1 min-w-0">
-                <Users className="w-3 h-3 shrink-0" strokeWidth={1.75} />
-                <span className="truncate max-w-[320px]">{formatAuthors(p)}</span>
-              </span>
-            )}
-            {p.outlet && (
-              <span className="inline-flex items-center gap-1 min-w-0">
-                <Building2 className="w-3 h-3 shrink-0" strokeWidth={1.75} />
-                <span className="truncate max-w-[240px]">{p.outlet}</span>
-              </span>
-            )}
-            {p.date && <span>{formatDate(p.date)}</span>}
+          <div className="text-[12px] text-gray-500 mt-0.5">
+            How each categorization is defined for this mastersheet
           </div>
         </div>
-        <div className="flex flex-col items-end gap-1.5 shrink-0">
-          {p.type && (
-            <span className={classNames('chip text-[10px] py-0.5 px-1.5', chipClass)}>
-              {p.type}
-            </span>
-          )}
-          {p.link && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-un-blue">
-              <LinkIcon className="w-3 h-3" strokeWidth={1.75} />
-              Link
-            </span>
-          )}
-        </div>
-      </button>
-    </li>
-  );
-}
-
-function PublicationDetail({
-  publication: p,
-  chipClass,
-  onClose,
-  onAskNexus,
-  onEdit,
-  onDelete,
-}: {
-  publication: Publication;
-  chipClass: string;
-  onClose: () => void;
-  onAskNexus: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-}) {
-  const definition = p.type ? PUBLICATION_TYPE_DEFINITIONS[p.type] : undefined;
-  return (
-    <>
-      <button
-        type="button"
-        aria-label="Close publication details"
-        className="fixed inset-0 z-40 bg-ink/20 md:bg-transparent"
-        onClick={onClose}
-      />
-      <aside className="fixed inset-y-0 right-0 z-50 w-full max-w-md bg-surface border-l border-rule shadow-panel flex flex-col fade-in">
-        <div className="px-5 py-4 border-b border-rule flex items-start gap-3 shrink-0">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-1.5 mb-2">
-              {p.type && (
-                <span className={classNames('chip text-[10px] py-0.5 px-1.5', chipClass)}>
-                  {p.type}
-                </span>
-              )}
-            </div>
-            <div className="font-display font-semibold text-[17px] leading-snug">{p.title}</div>
-            <div className="text-[13px] text-gray-600 mt-1">
-              {[p.outlet, p.date ? formatDate(p.date) : null].filter(Boolean).join(' · ')}
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="p-1.5 rounded-sm text-gray-400 hover:text-ink hover:bg-gray-50"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
-          {p.link && (
-            <a
-              href={p.link}
-              target="_blank"
-              rel="noreferrer"
-              className="btn btn-secondary w-full"
-            >
-              <ExternalLink className="w-4 h-4" />
-              Open publication
-            </a>
-          )}
-
-          {p.firstAuthor && <DetailRow icon={Users} label="First author" value={p.firstAuthor} />}
-          {p.otherAuthors && (
-            <DetailRow icon={Users} label="Other authors" value={p.otherAuthors} />
-          )}
-          {p.outlet && <DetailRow icon={Building2} label="Outlet / publisher" value={p.outlet} />}
-          {p.workPackage && <DetailRow icon={Layers} label="Work package" value={p.workPackage} />}
-          {p.targetAudience && (
-            <DetailRow icon={Target} label="Target audience" value={p.targetAudience} />
-          )}
-          {p.purpose && <DetailRow icon={Globe2} label="Purpose" value={p.purpose} />}
-
-          {definition && (
-            <div className="callout text-[11px] text-gray-500 leading-relaxed">{definition}</div>
-          )}
-        </div>
-
-        <div className="border-t border-rule p-4 bg-gray-50 shrink-0 space-y-2">
-          <button type="button" onClick={onAskNexus} className="btn btn-primary w-full">
-            <MessageSquare className="w-4 h-4" />
-            Ask Nexus about this publication
-          </button>
-          <div className="flex gap-2">
-            <button type="button" onClick={onEdit} className="btn btn-secondary flex-1 btn-sm">
-              <Pencil className="w-3.5 h-3.5" />
-              Edit
-            </button>
-            <button
-              type="button"
-              onClick={onDelete}
-              className="btn btn-ghost flex-1 btn-sm text-red-700 hover:bg-red-50"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              Delete
-            </button>
-          </div>
-        </div>
-      </aside>
-    </>
-  );
-}
-
-function DetailRow({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof Users;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-start gap-3">
-      <div className="w-8 h-8 rounded-sm bg-gray-50 text-gray-500 flex items-center justify-center shrink-0">
-        <Icon className="w-3.5 h-3.5" strokeWidth={1.75} />
+        <ChevronDown
+          className="w-4 h-4 text-gray-400 shrink-0 transition-transform group-open:rotate-180"
+          strokeWidth={1.75}
+        />
+      </summary>
+      <div className="border-t border-rule px-4 py-3">
+        <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
+          {PUBLICATION_TYPES.map((type) => {
+            const definition = PUBLICATION_TYPE_DEFINITIONS[type];
+            return (
+              <div key={type} className="min-w-0">
+                <dt className="text-[12px] font-semibold text-ink">{type}</dt>
+                {definition ? (
+                  <dd className="text-[12px] text-gray-500 mt-0.5 leading-snug">{definition}</dd>
+                ) : null}
+              </div>
+            );
+          })}
+        </dl>
       </div>
-      <div className="min-w-0 flex-1">
-        <div className="text-[11px] text-gray-500 uppercase tracking-wide font-semibold">
-          {label}
-        </div>
-        <div className="text-[13px] text-ink mt-0.5 whitespace-pre-wrap">{value}</div>
-      </div>
-    </div>
+    </details>
   );
 }

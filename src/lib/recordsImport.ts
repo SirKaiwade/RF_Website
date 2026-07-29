@@ -180,7 +180,7 @@ function colIndex(headers: string[], ...needles: string[]): number {
   return -1;
 }
 
-function findHeaderRow(rows: Cell[][]): number {
+export function findHeaderRow(rows: Cell[][]): number {
   for (let i = 0; i < Math.min(rows.length, 10); i++) {
     const nonEmpty = rows[i].filter((c) => cellText(c)).length;
     if (nonEmpty >= 3) return i;
@@ -268,7 +268,7 @@ function parseEventsSheet(rows: Cell[][], headerRow: number): IIGHEvent[] {
 
 // ---------- publications ----------
 
-function parsePublicationsSheet(rows: Cell[][], headerRow: number): Publication[] {
+export function parsePublicationsSheet(rows: Cell[][], headerRow: number): Publication[] {
   const headers = rows[headerRow].map(normHeader);
   const col = {
     date: colIndex(headers, 'date'),

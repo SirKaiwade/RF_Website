@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Publication } from '../types';
-import { PUBLICATION_TYPE_DEFINITIONS } from '../data/publications';
+import { PUBLICATION_TYPES } from '../data/publications';
 import { makeRecordId } from '../lib/recordId';
 import { emptyPublication } from '../lib/recordTemplates';
 import RecordFormModal, {
@@ -48,7 +48,7 @@ export default function PublicationEditor({ initial, onClose, onSave }: Props) {
     onClose();
   }
 
-  const types = Object.keys(PUBLICATION_TYPE_DEFINITIONS);
+  const types = PUBLICATION_TYPES;
 
   return (
     <RecordFormModal

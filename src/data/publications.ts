@@ -1,19 +1,42 @@
 import type { Publication } from '../types';
 import { createRecordsStore } from '../lib/recordsStore';
-import seedJson from './publications.seed.json';
 
-// Regenerate publications.seed.json from the mastersheet with:
-//   node scripts/build-seeds.mjs "<2026 Publication mastersheet.xlsx>"
-export const publicationsSeed = seedJson as Publication[];
+/** Publications start empty — paste or edit the mastersheet grid in-app. Synced via Supabase. */
+export const publicationsSeed: Publication[] = [];
 
 export const publicationsStore = createRecordsStore<Publication>(
-  'nexus:publications',
+  'nexus:publications-v2',
   publicationsSeed
 );
 
-export const PUBLICATION_TYPE_DEFINITIONS: Record<string, string> = {
+/** Canonical publication types, in institutional order. */
+export const PUBLICATION_TYPES = [
+  'Journal article',
+  'Policy brief',
+  'Research report',
+  'Briefing paper',
+  'Technical report',
+  'Working paper',
+  'Guidance note',
+  'Position paper',
+  'Meeting report',
+  'Evidence synthesis / Review',
+  'Case study',
+  'Op-ed / Commentary',
+  'Website article',
+  'Book chapter',
+  'Edited volume',
+  'Toolkit / Framework',
+  'Policy submission',
+] as const;
+
+export type PublicationType = (typeof PUBLICATION_TYPES)[number];
+
+/** Definitions for the type key. Empty string = listed without copy. */
+export const PUBLICATION_TYPE_DEFINITIONS: Record<PublicationType, string> = {
   'Journal article': 'Peer-reviewed academic article in a scholarly journal.',
-  'Policy brief': 'Short, targeted document translating evidence into policy recommendations.',
+  'Policy brief':
+    'Short, targeted document translating evidence into policy recommendations.',
   'Research report': 'Comprehensive report presenting original research and analysis.',
   'Briefing paper': 'Concise analytical paper to inform decision-makers or partners.',
   'Technical report': 'Detailed technical or methodological analysis.',
@@ -23,8 +46,12 @@ export const PUBLICATION_TYPE_DEFINITIONS: Record<string, string> = {
   'Meeting report': 'Synthesis of discussions and outcomes from a convening.',
   'Evidence synthesis / Review': 'Systematic or narrative review of existing evidence.',
   'Case study': 'Applied learning from a country, programme, or intervention.',
-  'Op-ed / Commentary': 'Opinion or agenda-setting piece for public or policy audiences.',
+  'Op-ed / Commentary':
+    'Opinion or agenda-setting piece for public or policy audiences.',
   'Website article': 'Institutional or partner web publication for dissemination.',
+  'Book chapter': '',
+  'Edited volume': '',
+  'Toolkit / Framework': '',
   'Policy submission': 'Formal input into consultation or intergovernmental process.',
 };
 
