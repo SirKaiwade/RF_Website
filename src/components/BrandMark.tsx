@@ -1,20 +1,25 @@
 interface Props {
-  /** Height of the UN emblem in pixels. */
+  /** Width of the UN emblem in pixels. */
   emblemSize?: number;
   /** Show "Nexus" wordmark beside the emblem. */
   showName?: boolean;
+  /** Optional line under the wordmark (e.g. "UNU Global Health"). */
+  org?: string;
   /** White emblem for dark backgrounds; blue for light. */
   variant?: 'light' | 'dark';
   className?: string;
   nameClassName?: string;
+  orgClassName?: string;
 }
 
 export default function BrandMark({
-  emblemSize = 32,
+  emblemSize = 40,
   showName = true,
+  org,
   variant = 'dark',
   className = '',
   nameClassName = '',
+  orgClassName = '',
 }: Props) {
   const emblemClass =
     variant === 'light' ? 'brand-emblem brand-emblem-light' : 'brand-emblem';
@@ -30,7 +35,12 @@ export default function BrandMark({
         draggable={false}
       />
       {showName && (
-        <span className={`brand-name ${nameClassName}`.trim()}>Nexus</span>
+        <div className="brand-text">
+          <span className={`brand-name ${nameClassName}`.trim()}>Nexus</span>
+          {org ? (
+            <span className={`brand-org ${orgClassName}`.trim()}>{org}</span>
+          ) : null}
+        </div>
       )}
     </div>
   );

@@ -87,7 +87,7 @@ export function createRecordsStore<T extends { id: string }>(
       ),
     get: () => snapshot,
     hydrate: (records) => {
-      if (!Array.isArray(records) || records.length === 0) return;
+      if (!Array.isArray(records)) return;
       persist(records);
     },
     merge: (incoming) => {

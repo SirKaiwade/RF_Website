@@ -1,12 +1,10 @@
 import type { EventType, IIGHEvent } from '../types';
 import { createRecordsStore } from '../lib/recordsStore';
-import seedJson from './events.seed.json';
 
-// Regenerate events.seed.json from the mastersheet with:
-//   node scripts/build-seeds.mjs "<2026 Events matrix.xlsx>"
-export const eventsSeed = seedJson as IIGHEvent[];
+/** Events start empty — staff upload or import the matrix in-app. Synced via Supabase. */
+export const eventsSeed: IIGHEvent[] = [];
 
-export const eventsStore = createRecordsStore<IIGHEvent>('nexus:events', eventsSeed);
+export const eventsStore = createRecordsStore<IIGHEvent>('nexus:events-v2', eventsSeed);
 
 export const EVENT_TYPES: EventType[] = [
   'Conference / Symposium',

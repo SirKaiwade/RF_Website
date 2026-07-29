@@ -1,7 +1,7 @@
 -- Nexus database schema for Supabase (free tier — plenty for 10–15 staff).
 -- Run in: Supabase Dashboard → SQL Editor → New query → paste → Run.
 
--- Profiles mirror signed-in users (Microsoft email as identity).
+-- Profiles mirror signed-in users (Supabase Auth email as identity).
 create table if not exists public.profiles (
   id uuid primary key default gen_random_uuid(),
   email text not null unique,
@@ -155,10 +155,18 @@ alter table public.directory_contacts enable row level security;
 alter table public.events enable row level security;
 alter table public.publications enable row level security;
 
--- For the pilot, allow all operations via anon key when email matches a simple
--- session claim. Replace with Supabase Auth + Microsoft provider when ready.
-create policy "profiles read own" on public.profiles
-  for select using (true);
+-- Pilot policies (open). Tighten once Auth JWT is enforced on every request.
+drop policy if exists "profiles read own" on public.profiles;
+drop policy if exists "profiles all for service" on public.profiles;
+drop policy if exists "conversations all for service" on public.conversations;
+drop policy if exists "messages all for service" on public.messages;
+drop policy if exists "library all for service" on public.library_documents;
+drop policy if exists "directory all for service" on public.directory_contacts;
+drop policy if exists "events all for service" on public.events;
+drop policy if exists "publications all for service" on public.publications;
+
+create policy "profiles all for service" on public.profiles
+  for all using (true) with check (true);
 
 create policy "conversations all for service" on public.conversations
   for all using (true) with check (true);
@@ -178,5 +186,4 @@ create policy "events all for service" on public.events
 create policy "publications all for service" on public.publications
   for all using (true) with check (true);
 
--- Note: tighten RLS before production. For 10–15 staff pilot with anon key,
--- prefer enabling Supabase Auth with Azure provider instead of open policies.
+-- Note: replace open policies with auth.uid()-scoped RLS before wider launch.

@@ -76,7 +76,7 @@ export default function SpreadsheetImport({ kind }: Props) {
   function resetData() {
     if (kind === 'events') eventsStore.reset();
     else publicationsStore.reset();
-    setNote('Restored the bundled mastersheet data.');
+    setNote(kind === 'events' ? 'Cleared all events.' : 'Restored the bundled mastersheet data.');
   }
 
   const hasImports =

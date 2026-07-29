@@ -116,12 +116,10 @@ export async function initLocalDataSync(): Promise<{ available: boolean; path?: 
     for (const name of Object.keys(COLLECTIONS) as LocalCollection[]) {
       const { store } = COLLECTIONS[name];
       const fromRemote = await SUPABASE_LOADERS[name]();
-      if (fromRemote && fromRemote.length > 0) {
+      // null = load failed — keep whatever is already in the browser store.
+      // [] / rows = Supabase is authoritative (including intentionally empty).
+      if (fromRemote !== null) {
         store.hydrate(fromRemote);
-      } else {
-        // Nothing in Supabase yet — push whatever this browser currently has
-        // (seed or local edits) so the shared table is seeded once.
-        await SUPABASE_SYNCERS[name](store.get());
       }
       store.setSync((records) => SUPABASE_SYNCERS[name](records));
     }

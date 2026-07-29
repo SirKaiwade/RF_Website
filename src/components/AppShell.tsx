@@ -116,7 +116,12 @@ export default function AppShell() {
         >
           <Menu className="w-5 h-5" strokeWidth={1.75} />
         </button>
-        <BrandMark emblemSize={22} nameClassName="text-[15px] font-bold leading-tight tracking-tight" />
+        <BrandMark
+          emblemSize={28}
+          org="UNU Global Health"
+          nameClassName="text-[15px] font-bold leading-none tracking-tight"
+          orgClassName="text-[9px]"
+        />
       </div>
       <div className="flex flex-1 min-h-0">
         <ConversationsSidebar

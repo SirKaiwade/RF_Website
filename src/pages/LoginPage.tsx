@@ -39,11 +39,11 @@ export default function LoginPage() {
         <div className="login-brand-inner">
           <div className="login-brand-mark">
             <BrandMark
-              emblemSize={52}
+              emblemSize={64}
               variant="light"
+              org="UNU Global Health"
               nameClassName="login-brand-name"
             />
-            <div className="login-brand-org">UNU Global Health</div>
           </div>
 
           <h1 className="login-headline">

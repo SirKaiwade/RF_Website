@@ -9,13 +9,12 @@ export const CATEGORY_LABELS: Record<ContactCategory, string> = {
   other: 'Other',
 };
 
-// No contacts ship by default — real UNU Global Health staff, government, NGO, and partner
-// contacts should be added here via the "Add contact" flow in the Directory page
-// (or a future bulk import) rather than seeded with placeholder people.
+// No contacts ship by default — directory starts empty. Staff add contacts in
+// the Directory page; rows sync to Supabase when configured.
 export const directorySeed: DirectoryContact[] = [];
 
 export const directoryStore = createRecordsStore<DirectoryContact>(
-  'nexus:directory',
+  'nexus:directory-v2',
   directorySeed
 );
 

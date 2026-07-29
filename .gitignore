@@ -24,3 +24,4 @@ dist-ssr
 
 # Local Nexus data (events, publications, directory JSON)
 data/local/*.json
+supabase/.temp/
