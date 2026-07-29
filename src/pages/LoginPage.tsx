@@ -43,7 +43,7 @@ export default function LoginPage() {
               variant="light"
               nameClassName="login-brand-name"
             />
-            <div className="login-brand-org">UNU International Institute for Global Health</div>
+            <div className="login-brand-org">UNU Global Health</div>
           </div>
 
           <h1 className="login-headline">
@@ -63,7 +63,7 @@ export default function LoginPage() {
         </div>
 
         <div className="login-brand-foot">
-          United Nations University · International Institute for Global Health
+          United Nations University · Global Health
         </div>
       </div>
 
@@ -138,7 +138,7 @@ export default function LoginPage() {
         </div>
 
         <p className="login-panel-foot">
-          Need access? Contact your programme administrator or UNU-IIGH ICT.
+          Need access? Contact your programme administrator or UNU Global Health ICT.
         </p>
       </div>
     </div>

@@ -9,7 +9,7 @@ export const CATEGORY_LABELS: Record<ContactCategory, string> = {
   other: 'Other',
 };
 
-// No contacts ship by default — real UNU-IIGH staff, government, NGO, and partner
+// No contacts ship by default — real UNU Global Health staff, government, NGO, and partner
 // contacts should be added here via the "Add contact" flow in the Directory page
 // (or a future bulk import) rather than seeded with placeholder people.
 export const directorySeed: DirectoryContact[] = [];

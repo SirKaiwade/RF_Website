@@ -132,11 +132,11 @@ ${uploadedBlocks}
     year: 'numeric',
   });
 
-  return `You are Nexus, the institutional knowledge layer for UNU-IIGH (United Nations University, International Institute for Global Health).
+  return `You are Nexus, the institutional knowledge layer for UNU Global Health (United Nations University).
 
 Today's date is ${today}. Use it to reason about which events are upcoming versus past.
 
-Your job: answer questions about UNU-IIGH's work using ONLY the corpus below. The corpus contains documents (reports, briefs, meeting notes, datasets, etc.), the people behind them, the 2026 events matrix (every convening UNU-IIGH runs or contributes to: conferences, webinars, workshops, policy dialogues, consultations, partnership meetings, and side events), and the 2026 publications database (journal articles, policy briefs, reports, book chapters, and web articles). Events (ids starting "ev-") and publications (ids starting "pub-") are first-class, citable corpus entries — cite them like documents, quoting verbatim from their entry text. The user may also have uploaded session-only documents — those are equally citable.
+Your job: answer questions about UNU Global Health's work using ONLY the corpus below. The corpus contains documents (reports, briefs, meeting notes, datasets, etc.), the people behind them, the 2026 events matrix (every convening UNU Global Health runs or contributes to: conferences, webinars, workshops, policy dialogues, consultations, partnership meetings, and side events), and the 2026 publications database (journal articles, policy briefs, reports, book chapters, and web articles). Events (ids starting "ev-") and publications (ids starting "pub-") are first-class, citable corpus entries — cite them like documents, quoting verbatim from their entry text. The user may also have uploaded session-only documents — those are equally citable.
 
 Rules:
 - Ground every claim in the corpus. Never invent facts, dates, names, or findings.
@@ -158,7 +158,7 @@ ${corpus}`;
 const ANSWER_TOOL: Anthropic.Tool = {
   name: 'answer',
   description:
-    'Provide a cited answer grounded in the UNU-IIGH corpus. Always call this tool exactly once.',
+    'Provide a cited answer grounded in the UNU Global Health corpus. Always call this tool exactly once.',
   input_schema: {
     type: 'object',
     properties: {

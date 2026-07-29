@@ -299,7 +299,7 @@ export default function LibraryPage() {
 
               <p className="mt-10 text-[12px] text-gray-500 max-w-2xl leading-relaxed">
                 {cloud
-                  ? 'Documents are parsed in your browser and saved to the shared UNU-IIGH library so the whole team can search them in chat.'
+                  ? 'Documents are parsed in your browser and saved to the shared UNU Global Health library so the whole team can search them in chat.'
                   : 'Documents stay in this browser until Supabase is configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to enable the shared library.'}
               </p>
             </>

@@ -195,7 +195,7 @@ export default function ConversationsSidebar({
             <div className="space-y-1.5 min-w-0">
               <BrandMark emblemSize={30} nameClassName="text-[17px] font-bold leading-tight tracking-tight" />
               <div className="text-[11px] text-gray-500 uppercase tracking-[0.08em] font-medium pl-[42px] -mt-0.5">
-                UNU-IIGH
+                UNU Global Health
               </div>
             </div>
             <div className="flex items-center gap-0.5 shrink-0">

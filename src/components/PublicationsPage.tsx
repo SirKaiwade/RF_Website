@@ -217,7 +217,7 @@ export default function PublicationsPage() {
             <EmptyState
               icon={BookOpen}
               title="No publications yet"
-              description="Import the publication mastersheet or add outputs manually. Nexus uses this catalog to answer questions about what UNU-IIGH has published."
+              description="Import the publication mastersheet or add outputs manually. Nexus uses this catalog to answer questions about what UNU Global Health has published."
               action={
                 <button type="button" onClick={openAdd} className="btn btn-primary btn-sm">
                   <Plus className="w-3.5 h-3.5" />
