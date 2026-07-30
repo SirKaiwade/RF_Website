@@ -121,6 +121,8 @@ create table if not exists public.events (
   media_coverage text,
   social_media text,
   high_level_participants text,
+  status text,
+  staff_count integer,
   updated_at timestamptz not null default now()
 );
 
@@ -137,6 +139,15 @@ create table if not exists public.publications (
   type text,
   outlet text,
   link text,
+  doi text,
+  collections_link text,
+  external_link text,
+  url text,
+  full_citation text,
+  pelikan_project_id text,
+  in_collections boolean,
+  isbn text,
+  files text,
   work_package text,
   target_audience text,
   global_south boolean,
@@ -145,6 +156,19 @@ create table if not exists public.publications (
 );
 
 create index if not exists publications_date_idx on public.publications (date);
+
+-- Additive columns for installs created before the full mastersheet mapping.
+alter table public.events add column if not exists status text;
+alter table public.events add column if not exists staff_count integer;
+alter table public.publications add column if not exists doi text;
+alter table public.publications add column if not exists collections_link text;
+alter table public.publications add column if not exists external_link text;
+alter table public.publications add column if not exists url text;
+alter table public.publications add column if not exists full_citation text;
+alter table public.publications add column if not exists pelikan_project_id text;
+alter table public.publications add column if not exists in_collections boolean;
+alter table public.publications add column if not exists isbn text;
+alter table public.publications add column if not exists files text;
 
 -- Row-level security: users only see their own rows.
 alter table public.profiles enable row level security;

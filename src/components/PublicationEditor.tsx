@@ -41,6 +41,14 @@ export default function PublicationEditor({ initial, onClose, onSave }: Props) {
       type: nullIfEmpty(draft.type ?? ''),
       outlet: nullIfEmpty(draft.outlet ?? ''),
       link: nullIfEmpty(draft.link ?? ''),
+      doi: nullIfEmpty(draft.doi ?? ''),
+      collectionsLink: nullIfEmpty(draft.collectionsLink ?? ''),
+      externalLink: nullIfEmpty(draft.externalLink ?? ''),
+      url: nullIfEmpty(draft.url ?? ''),
+      fullCitation: nullIfEmpty(draft.fullCitation ?? ''),
+      pelikanProjectId: nullIfEmpty(draft.pelikanProjectId ?? ''),
+      isbn: nullIfEmpty(draft.isbn ?? ''),
+      files: nullIfEmpty(draft.files ?? ''),
       workPackage: nullIfEmpty(draft.workPackage ?? ''),
       targetAudience: nullIfEmpty(draft.targetAudience ?? ''),
       purpose: nullIfEmpty(draft.purpose ?? ''),
@@ -113,22 +121,79 @@ export default function PublicationEditor({ initial, onClose, onSave }: Props) {
           onChange={(e) => set('outlet', e.target.value)}
         />
       </FormField>
-      <FormField label="Link / DOI">
-        <input
-          type="url"
-          className={textInput()}
-          value={draft.link ?? ''}
-          onChange={(e) => set('link', e.target.value)}
-          placeholder="https://"
+      <FormField label="Full citation">
+        <textarea
+          className={textArea()}
+          value={draft.fullCitation ?? ''}
+          onChange={(e) => set('fullCitation', e.target.value)}
         />
       </FormField>
-      <FormField label="Work package">
-        <input
-          className={textInput()}
-          value={draft.workPackage ?? ''}
-          onChange={(e) => set('workPackage', e.target.value)}
-        />
-      </FormField>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <FormField label="Full DOI">
+          <input
+            className={textInput()}
+            value={draft.doi ?? ''}
+            onChange={(e) => set('doi', e.target.value)}
+          />
+        </FormField>
+        <FormField label="External link">
+          <input
+            type="url"
+            className={textInput()}
+            value={draft.externalLink ?? ''}
+            onChange={(e) => set('externalLink', e.target.value)}
+            placeholder="https://"
+          />
+        </FormField>
+        <FormField label="UNU Collections link">
+          <input
+            type="url"
+            className={textInput()}
+            value={draft.collectionsLink ?? ''}
+            onChange={(e) => set('collectionsLink', e.target.value)}
+            placeholder="https://"
+          />
+        </FormField>
+        <FormField label="URL">
+          <input
+            type="url"
+            className={textInput()}
+            value={draft.url ?? ''}
+            onChange={(e) => set('url', e.target.value)}
+            placeholder="https://"
+          />
+        </FormField>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <FormField label="ISBN">
+          <input
+            className={textInput()}
+            value={draft.isbn ?? ''}
+            onChange={(e) => set('isbn', e.target.value)}
+          />
+        </FormField>
+        <FormField label="Pelikan project ID">
+          <input
+            className={textInput()}
+            value={draft.pelikanProjectId ?? ''}
+            onChange={(e) => set('pelikanProjectId', e.target.value)}
+          />
+        </FormField>
+        <FormField label="Files">
+          <input
+            className={textInput()}
+            value={draft.files ?? ''}
+            onChange={(e) => set('files', e.target.value)}
+          />
+        </FormField>
+        <FormField label="Work package">
+          <input
+            className={textInput()}
+            value={draft.workPackage ?? ''}
+            onChange={(e) => set('workPackage', e.target.value)}
+          />
+        </FormField>
+      </div>
       <FormField label="Target audience">
         <input
           className={textInput()}
@@ -136,7 +201,7 @@ export default function PublicationEditor({ initial, onClose, onSave }: Props) {
           onChange={(e) => set('targetAudience', e.target.value)}
         />
       </FormField>
-      <FormField label="Purpose">
+      <FormField label="Comments / purpose">
         <textarea
           className={textArea()}
           value={draft.purpose ?? ''}

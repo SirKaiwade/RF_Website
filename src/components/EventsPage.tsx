@@ -519,6 +519,11 @@ function EventDetailPanel({
           onSave={(date) => onPatch({ date: date || null })}
         />
         <InlineEditField
+          label="Status"
+          value={event.status ?? ''}
+          onSave={(status) => onPatch({ status: status || null })}
+        />
+        <InlineEditField
           label="Owner / focal point"
           value={event.owner ?? ''}
           onSave={(owner) => onPatch({ owner: owner || null })}
@@ -559,6 +564,31 @@ function EventDetailPanel({
             const n = parseInt(v.replace(/,/g, ''), 10);
             onPatch({ totalParticipants: Number.isFinite(n) ? n : null });
           }}
+        />
+        <InlineEditField
+          label="Number of IIGH staff"
+          value={event.staffCount != null ? String(event.staffCount) : ''}
+          onSave={(v) => {
+            const n = parseInt(v.replace(/,/g, ''), 10);
+            onPatch({ staffCount: Number.isFinite(n) ? n : null });
+          }}
+        />
+        <InlineEditField
+          label="Global South collaboration"
+          value={
+            event.southSouthExchange == null ? '' : event.southSouthExchange ? 'Yes' : 'No'
+          }
+          onSave={(v) => {
+            const s = v.trim().toLowerCase();
+            if (!s) onPatch({ southSouthExchange: null });
+            else if (s.startsWith('y')) onPatch({ southSouthExchange: true });
+            else if (s.startsWith('n')) onPatch({ southSouthExchange: false });
+          }}
+        />
+        <InlineEditField
+          label="Under overall UNU / programme"
+          value={event.programme ?? ''}
+          onSave={(programme) => onPatch({ programme: programme || null })}
         />
         <InlineEditField
           label="Social media"

@@ -185,6 +185,8 @@ export interface EventRow {
   media_coverage: string | null;
   social_media: string | null;
   high_level_participants: string | null;
+  status: string | null;
+  staff_count: number | null;
   updated_at?: string;
 }
 
@@ -197,6 +199,15 @@ export interface PublicationRow {
   type: string | null;
   outlet: string | null;
   link: string | null;
+  doi: string | null;
+  collections_link: string | null;
+  external_link: string | null;
+  url: string | null;
+  full_citation: string | null;
+  pelikan_project_id: string | null;
+  in_collections: boolean | null;
+  isbn: string | null;
+  files: string | null;
   work_package: string | null;
   target_audience: string | null;
   global_south: boolean | null;

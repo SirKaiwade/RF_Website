@@ -34,6 +34,8 @@ function toRow(e: IIGHEvent): EventRow {
     media_coverage: e.mediaCoverage,
     social_media: e.socialMedia,
     high_level_participants: e.highLevelParticipants,
+    status: e.status,
+    staff_count: e.staffCount,
   };
 }
 
@@ -69,6 +71,8 @@ function fromRow(row: EventRow): IIGHEvent {
     mediaCoverage: row.media_coverage,
     socialMedia: row.social_media,
     highLevelParticipants: row.high_level_participants,
+    status: row.status ?? null,
+    staffCount: row.staff_count ?? null,
   };
 }
 

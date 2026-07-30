@@ -10,6 +10,15 @@ export function emptyPublication(): Publication {
     type: null,
     outlet: null,
     link: null,
+    doi: null,
+    collectionsLink: null,
+    externalLink: null,
+    url: null,
+    fullCitation: null,
+    pelikanProjectId: null,
+    inCollections: null,
+    isbn: null,
+    files: null,
     workPackage: null,
     targetAudience: null,
     globalSouth: null,
@@ -49,6 +58,8 @@ export function emptyEvent(): IIGHEvent {
     mediaCoverage: null,
     socialMedia: null,
     highLevelParticipants: null,
+    status: null,
+    staffCount: null,
   };
 }
 

@@ -287,6 +287,15 @@ function colIndex(headers: string[], ...needles: string[]): number {
   return -1;
 }
 
+/** Prefer exact header equality, then fall back to substring match. */
+function colIndexPreferExact(headers: string[], ...needles: string[]): number {
+  for (const needle of needles) {
+    const i = headers.findIndex((h) => h === needle);
+    if (i !== -1) return i;
+  }
+  return colIndex(headers, ...needles);
+}
+
 export function findHeaderRow(rows: Cell[][]): number {
   for (let i = 0; i < Math.min(rows.length, 15); i++) {
     const headers = rows[i].map(normHeader);
@@ -344,6 +353,7 @@ export function parseEventsSheet(rows: Cell[][], headerRow: number): IIGHEvent[]
     media: colIndex(headers, 'media coverage'),
     social: colIndex(headers, 'social media'),
     highLevel: colIndex(headers, 'high-level participants'),
+    status: colIndex(headers, 'status'),
   };
 
   const get = (row: Cell[], i: number): Cell => (i >= 0 ? row[i] : null);
@@ -388,6 +398,8 @@ export function parseEventsSheet(rows: Cell[][], headerRow: number): IIGHEvent[]
       mediaCoverage: cellText(get(row, col.media)),
       socialMedia: cellText(get(row, col.social)),
       highLevelParticipants: cellText(get(row, col.highLevel)),
+      status: cellText(get(row, col.status)),
+      staffCount: cellNumber(get(row, col.staff)),
     });
   }
   return events;
@@ -399,20 +411,28 @@ export function parsePublicationsSheet(rows: Cell[][], headerRow: number): Publi
   const headers = rows[headerRow].map(normHeader);
   const col = {
     date: colIndex(headers, 'year-month-day', 'date'),
-    title: colIndex(headers, 'title'),
+    title: colIndexPreferExact(headers, 'title'),
     firstAuthor: colIndex(headers, 'first author'),
     otherAuthors: colIndex(headers, 'other authors'),
     // Prefer the leftmost "publication type" (2023–24 has two)
     type: colIndex(headers, 'publication type', 'type'),
     outlet: colIndex(headers, 'publication name', 'outlet', 'publisher'),
     doi: colIndex(headers, 'full doi', 'doi'),
-    collections: colIndex(headers, 'unu collections', 'collections link'),
+    collectionsLink: colIndex(headers, 'unu collections', 'collections link'),
     external: colIndex(headers, 'external link'),
-    link: colIndex(headers, 'link'),
+    url: colIndexPreferExact(headers, 'url'),
+    link: colIndexPreferExact(headers, 'link'),
+    fullCitation: colIndex(headers, 'full citation'),
+    comments: colIndex(headers, 'comments'),
+    purpose: colIndexPreferExact(headers, 'purpose'),
+    pelikan: colIndex(headers, 'pelikan'),
+    // Exact "collections" — not "unu collections link"
+    inCollections: headers.findIndex((h) => h === 'collections'),
+    isbn: colIndex(headers, 'isbn'),
+    files: colIndexPreferExact(headers, 'files'),
     workPackage: colIndex(headers, 'work package'),
     audience: colIndex(headers, 'target audience'),
     globalSouth: colIndex(headers, 'global south'),
-    purpose: colIndex(headers, 'purpose', 'comments'),
   };
 
   const get = (row: Cell[], i: number): Cell => (i >= 0 ? row[i] : null);
@@ -425,11 +445,16 @@ export function parsePublicationsSheet(rows: Cell[][], headerRow: number): Publi
     if (/^title$/i.test(title)) continue;
 
     const { date, note } = parseDateCell(get(row, col.date));
+    const doi = cellText(get(row, col.doi));
+    const collectionsLink = cellText(get(row, col.collectionsLink));
+    const externalLink = cellText(get(row, col.external));
+    const url = cellText(get(row, col.url));
     const link =
-      cellText(get(row, col.doi)) ||
-      cellText(get(row, col.external)) ||
+      doi ||
+      externalLink ||
+      url ||
       cellText(get(row, col.link)) ||
-      cellText(get(row, col.collections));
+      collectionsLink;
 
     pubs.push({
       id: hashId('pub', `${title.toLowerCase()}|${date ?? note ?? ''}`),
@@ -440,10 +465,19 @@ export function parsePublicationsSheet(rows: Cell[][], headerRow: number): Publi
       type: normalizePubType(get(row, col.type)),
       outlet: cellText(get(row, col.outlet)),
       link,
+      doi,
+      collectionsLink,
+      externalLink,
+      url,
+      fullCitation: cellText(get(row, col.fullCitation)),
+      pelikanProjectId: cellText(get(row, col.pelikan)),
+      inCollections: yesNo(get(row, col.inCollections)),
+      isbn: cellText(get(row, col.isbn)),
+      files: cellText(get(row, col.files)),
       workPackage: cellText(get(row, col.workPackage)),
       targetAudience: cellText(get(row, col.audience)),
       globalSouth: yesNo(get(row, col.globalSouth)),
-      purpose: cellText(get(row, col.purpose)),
+      purpose: cellText(get(row, col.purpose)) ?? cellText(get(row, col.comments)),
     });
   }
   return pubs;

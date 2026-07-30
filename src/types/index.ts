@@ -147,6 +147,10 @@ export interface IIGHEvent {
   mediaCoverage: string | null;
   socialMedia: string | null;
   highLevelParticipants: string | null;
+  /** Matrix “Status” column. */
+  status: string | null;
+  /** Matrix “Number of IIGH Staff”. */
+  staffCount: number | null;
 }
 
 export interface Publication {
@@ -158,10 +162,22 @@ export interface Publication {
   otherAuthors: string | null;
   type: string | null;
   outlet: string | null;
+  /** Best openable URL (DOI → external → URL → collections). */
   link: string | null;
+  doi: string | null;
+  collectionsLink: string | null;
+  externalLink: string | null;
+  url: string | null;
+  fullCitation: string | null;
+  pelikanProjectId: string | null;
+  /** Sheet “Collections” YES/NO. */
+  inCollections: boolean | null;
+  isbn: string | null;
+  files: string | null;
   workPackage: string | null;
   targetAudience: string | null;
   globalSouth: boolean | null;
+  /** Purpose / Comments from the sheet. */
   purpose: string | null;
 }
 

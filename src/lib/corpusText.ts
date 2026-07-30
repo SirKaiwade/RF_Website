@@ -46,6 +46,8 @@ export function eventToText(e: IIGHEvent): string {
     line('Website article', e.websiteArticle),
     line('Media coverage', e.mediaCoverage),
     line('Social media', e.socialMedia),
+    line('Status', e.status),
+    line('IIGH staff count', e.staffCount),
   ].filter(Boolean);
 
   if (e.description) parts.push(`\nDescription:\n${e.description}`);
@@ -61,11 +63,20 @@ export function publicationToText(p: Publication): string {
     line('Other authors', p.otherAuthors),
     line('Publication type', p.type),
     line('Outlet / publisher', p.outlet),
-    line('Link / DOI', p.link),
+    line('Full citation', p.fullCitation),
+    line('DOI', p.doi),
+    line('UNU Collections link', p.collectionsLink),
+    line('External link', p.externalLink),
+    line('URL', p.url),
+    line('Link', p.link),
+    line('In UNU Collections', p.inCollections),
+    line('ISBN', p.isbn),
+    line('Files', p.files),
+    line('Pelikan project ID', p.pelikanProjectId),
     line('Work package', p.workPackage),
     line('Target audience', p.targetAudience),
     line('Global South focus', p.globalSouth),
-    line('Purpose', p.purpose),
+    line('Comments / purpose', p.purpose),
   ].filter(Boolean);
   return parts.join('\n');
 }

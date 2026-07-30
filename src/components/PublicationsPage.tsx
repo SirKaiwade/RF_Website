@@ -2,14 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import {
   BookOpen,
-  Building2,
   ChevronDown,
-  FileText,
+  ChevronRight,
   Link as LinkIcon,
   MessageSquare,
   Plus,
   Trash2,
-  Users,
 } from 'lucide-react';
 import type { Publication } from '../types';
 import {
@@ -36,6 +34,10 @@ function typeChipClass(type: string | null): string {
   return i === -1 ? 'chip-gray' : TYPE_CHIP_COLORS[i % TYPE_CHIP_COLORS.length];
 }
 
+function primaryHref(p: Publication): string | null {
+  return p.doi || p.externalLink || p.url || p.link || p.collectionsLink || null;
+}
+
 export default function PublicationsPage() {
   const ctx = useOutletContext<ShellContext>();
   const navigate = useNavigate();
@@ -45,12 +47,12 @@ export default function PublicationsPage() {
 
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     const open = searchParams.get('open');
     if (open) {
-      setSelectedId(open);
+      setExpandedId(open);
       setSearchParams({}, { replace: true });
     }
   }, [searchParams, setSearchParams]);
@@ -65,7 +67,6 @@ export default function PublicationsPage() {
   }, [publications]);
 
   const filterTypes = useMemo(() => {
-    // Canonical key order first, then any leftover imported labels
     const extras = [...typeCounts.keys()].filter(
       (t) => !(PUBLICATION_TYPES as readonly string[]).includes(t) && (typeCounts.get(t) ?? 0) > 0
     );
@@ -74,7 +75,7 @@ export default function PublicationsPage() {
 
   const stats = useMemo(() => {
     const peerReviewed = publications.filter((p) => p.type === 'Journal article').length;
-    const withLink = publications.filter((p) => p.link).length;
+    const withLink = publications.filter((p) => primaryHref(p)).length;
     return {
       total: publications.filter((p) => p.title.trim()).length,
       peerReviewed,
@@ -89,14 +90,22 @@ export default function PublicationsPage() {
         if (!p.title.trim()) return false;
         if (typeFilter !== 'all' && p.type !== typeFilter) return false;
         if (!q) return true;
-        return [p.title, p.firstAuthor, p.otherAuthors, p.outlet, p.purpose, p.type]
+        return [
+          p.title,
+          p.firstAuthor,
+          p.otherAuthors,
+          p.outlet,
+          p.purpose,
+          p.type,
+          p.fullCitation,
+          p.doi,
+          p.workPackage,
+        ]
           .filter(Boolean)
           .some((v) => v!.toLowerCase().includes(q));
       })
       .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '') || a.title.localeCompare(b.title));
   }, [publications, query, typeFilter]);
-
-  const selected = selectedId ? getPublication(selectedId) ?? null : null;
 
   function askNexusAbout(p: Publication) {
     ctx.sendMessage(`What do we know about the publication "${p.title}"?`);
@@ -106,7 +115,27 @@ export default function PublicationsPage() {
   function patchPublication(id: string, patch: Partial<Publication>) {
     const current = getPublication(id);
     if (!current) return;
-    publicationsStore.update({ ...current, ...patch });
+    const next = { ...current, ...patch };
+    // Keep convenience `link` in sync with the best available URL.
+    if (
+      'doi' in patch ||
+      'externalLink' in patch ||
+      'url' in patch ||
+      'collectionsLink' in patch
+    ) {
+      next.link =
+        next.doi ||
+        next.externalLink ||
+        next.url ||
+        next.collectionsLink ||
+        next.link ||
+        null;
+    }
+    publicationsStore.update(next);
+  }
+
+  function toggleExpand(id: string) {
+    setExpandedId((cur) => (cur === id ? null : id));
   }
 
   function addBlank() {
@@ -116,13 +145,13 @@ export default function PublicationsPage() {
       title: 'Untitled publication',
     };
     publicationsStore.add(blank);
-    setSelectedId(blank.id);
+    setExpandedId(blank.id);
   }
 
   function deletePublication(p: Publication) {
     if (!window.confirm(`Delete "${p.title}"? This cannot be undone.`)) return;
     publicationsStore.remove(p.id);
-    setSelectedId(null);
+    if (expandedId === p.id) setExpandedId(null);
   }
 
   return (
@@ -198,7 +227,7 @@ export default function PublicationsPage() {
             <EmptyState
               icon={BookOpen}
               title="No publications yet"
-              description="Import your publications workbook (.xlsx). Nothing is hardcoded — load 2023–2025 from scratch. Double-click any field to edit; changes save automatically."
+              description="Import your publications workbook (.xlsx). Click a row to expand every spreadsheet field under the title. Double-click any field to edit; changes save automatically."
               action={<SpreadsheetImport kind="publications" />}
             />
           ) : filtered.length === 0 ? (
@@ -208,31 +237,43 @@ export default function PublicationsPage() {
                 : 'No publications match these filters.'}
             </div>
           ) : (
-            <ul className="border border-rule rounded-sm divide-y divide-rule bg-surface">
-              {filtered.map((p) => (
-                <PublicationRow
-                  key={p.id}
-                  publication={p}
-                  chipClass={typeChipClass(p.type)}
-                  active={selectedId === p.id}
-                  onOpen={() => setSelectedId(p.id)}
-                />
-              ))}
-            </ul>
+            <div className="border border-rule rounded-sm bg-surface overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th className="w-8" />
+                      <th>Date</th>
+                      <th>Title</th>
+                      <th>Type</th>
+                      <th>Authors</th>
+                      <th>Outlet</th>
+                      <th className="w-24">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((p) => {
+                      const open = expandedId === p.id;
+                      return (
+                        <PublicationRegisterRows
+                          key={p.id}
+                          publication={p}
+                          open={open}
+                          chipClass={typeChipClass(p.type)}
+                          onToggle={() => toggleExpand(p.id)}
+                          onDelete={() => deletePublication(p)}
+                          onAskNexus={() => askNexusAbout(p)}
+                          onPatch={(patch) => patchPublication(p.id, patch)}
+                        />
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
         </div>
       </div>
-
-      {selected && (
-        <PublicationDetail
-          publication={selected}
-          chipClass={typeChipClass(selected.type)}
-          onClose={() => setSelectedId(null)}
-          onAskNexus={() => askNexusAbout(selected)}
-          onPatch={(patch) => patchPublication(selected.id, patch)}
-          onDelete={() => deletePublication(selected)}
-        />
-      )}
     </section>
   );
 }
@@ -273,188 +314,287 @@ function PublicationTypeKey() {
   );
 }
 
-function PublicationRow({
+function PublicationRegisterRows({
   publication: p,
+  open,
   chipClass,
-  active,
-  onOpen,
+  onToggle,
+  onDelete,
+  onAskNexus,
+  onPatch,
 }: {
   publication: Publication;
+  open: boolean;
   chipClass: string;
-  active: boolean;
-  onOpen: () => void;
+  onToggle: () => void;
+  onDelete: () => void;
+  onAskNexus: () => void;
+  onPatch: (patch: Partial<Publication>) => void;
 }) {
+  const href = primaryHref(p);
+
   return (
-    <li>
-      <button
-        type="button"
-        onClick={onOpen}
-        className={classNames(
-          'w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-gray-50 transition-colors',
-          active ? 'bg-un-blue-bg/60' : ''
-        )}
-      >
-        <div className="w-8 h-8 rounded-sm bg-un-blue-bg text-un-blue flex items-center justify-center shrink-0 mt-0.5">
-          <FileText className="w-3.5 h-3.5" strokeWidth={1.75} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-semibold text-ink leading-snug line-clamp-2">
-            {p.title}
-          </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-gray-500">
-            {formatAuthors(p) && (
-              <span className="inline-flex items-center gap-1 min-w-0">
-                <Users className="w-3 h-3 shrink-0" strokeWidth={1.75} />
-                <span className="truncate max-w-[320px]">{formatAuthors(p)}</span>
-              </span>
-            )}
-            {p.outlet && (
-              <span className="inline-flex items-center gap-1 min-w-0">
-                <Building2 className="w-3 h-3 shrink-0" strokeWidth={1.75} />
-                <span className="truncate max-w-[240px]">{p.outlet}</span>
-              </span>
-            )}
-            {p.date && <span>{formatDate(p.date)}</span>}
-          </div>
-        </div>
-        <div className="flex flex-col items-end gap-1.5 shrink-0">
-          {p.type && (
-            <span className={classNames('chip text-[10px] py-0.5 px-1.5', chipClass)}>
-              {p.type}
-            </span>
+    <>
+      <tr className={classNames('data-row', open && 'data-row-open')} onClick={onToggle}>
+        <td className="text-gray-400 w-8">
+          {open ? (
+            <ChevronDown className="w-4 h-4" strokeWidth={1.75} />
+          ) : (
+            <ChevronRight className="w-4 h-4" strokeWidth={1.75} />
           )}
-          {p.link && (
-            <span className="inline-flex items-center gap-1 text-[10px] text-un-blue">
-              <LinkIcon className="w-3 h-3" strokeWidth={1.75} />
-              Link
-            </span>
+        </td>
+        <td>
+          <div className="whitespace-nowrap font-medium tabular-nums text-ink">
+            {p.date ? formatDate(p.date) : '—'}
+          </div>
+        </td>
+        <td>
+          <div className="min-w-0 max-w-[360px]">
+            <div className="font-semibold text-ink leading-snug line-clamp-2">{p.title}</div>
+            {p.workPackage && (
+              <div className="text-[11px] text-gray-500 mt-0.5 truncate">{p.workPackage}</div>
+            )}
+          </div>
+        </td>
+        <td>
+          {p.type ? (
+            <span className={classNames('chip text-[10px] py-0.5 px-1.5', chipClass)}>{p.type}</span>
+          ) : (
+            <span className="text-gray-400">—</span>
           )}
-        </div>
-      </button>
-    </li>
+        </td>
+        <td>
+          <span className="text-[12px] text-gray-700 max-w-[180px] line-clamp-2">
+            {formatAuthors(p) || '—'}
+          </span>
+        </td>
+        <td>
+          <span className="text-[12px] text-gray-600 max-w-[180px] line-clamp-2">
+            {p.outlet || '—'}
+          </span>
+        </td>
+        <td onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-0.5">
+            {href && (
+              <a
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                className="p-1.5 rounded-sm text-gray-400 hover:text-un-blue hover:bg-un-blue-bg"
+                title="Open link"
+                aria-label={`Open link for ${p.title}`}
+              >
+                <LinkIcon className="w-3.5 h-3.5" strokeWidth={1.75} />
+              </a>
+            )}
+            <button
+              type="button"
+              onClick={onDelete}
+              className="p-1.5 rounded-sm text-gray-400 hover:text-accent-red hover:bg-red-50"
+              title="Delete"
+              aria-label={`Delete ${p.title}`}
+            >
+              <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+            </button>
+          </div>
+        </td>
+      </tr>
+      {open && (
+        <tr className="data-detail">
+          <td colSpan={7}>
+            <PublicationDetailPanel
+              publication={p}
+              chipClass={chipClass}
+              onAskNexus={onAskNexus}
+              onPatch={onPatch}
+            />
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
-function PublicationDetail({
+function PublicationDetailPanel({
   publication: p,
   chipClass,
-  onClose,
   onAskNexus,
   onPatch,
-  onDelete,
 }: {
   publication: Publication;
   chipClass: string;
-  onClose: () => void;
   onAskNexus: () => void;
   onPatch: (patch: Partial<Publication>) => void;
-  onDelete: () => void;
 }) {
   const definition =
     p.type && p.type in PUBLICATION_TYPE_DEFINITIONS
       ? PUBLICATION_TYPE_DEFINITIONS[p.type as keyof typeof PUBLICATION_TYPE_DEFINITIONS]
       : undefined;
 
+  const links = [
+    { label: 'DOI', href: p.doi },
+    { label: 'External', href: p.externalLink },
+    { label: 'Collections', href: p.collectionsLink },
+    { label: 'URL', href: p.url },
+  ].filter((l): l is { label: string; href: string } => Boolean(l.href));
+
   return (
-    <>
-      <button
-        type="button"
-        aria-label="Close publication details"
-        className="fixed inset-0 z-40 bg-ink/20 md:bg-transparent"
-        onClick={onClose}
-      />
-      <aside className="fixed inset-y-0 right-0 z-50 w-full max-w-md bg-surface border-l border-rule shadow-panel flex flex-col fade-in">
-        <div className="px-5 py-4 border-b border-rule flex items-start gap-3 shrink-0">
-          <div className="min-w-0 flex-1">
-            {p.type && (
-              <span className={classNames('chip text-[10px] mb-2', chipClass)}>{p.type}</span>
-            )}
-            <h2 className="text-[16px] font-semibold text-ink leading-snug">
-              <InlineEditField
-                value={p.title}
-                onSave={(title) => onPatch({ title: title || p.title })}
-              />
-            </h2>
-            {definition && (
-              <p className="mt-2 text-[12px] text-gray-500 leading-snug">{definition}</p>
-            )}
-            <p className="mt-2 text-[11px] text-gray-400">Double-click any field to edit · autosaves</p>
-          </div>
-          <button type="button" onClick={onClose} className="btn btn-ghost btn-sm" aria-label="Close">
-            ✕
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-1 text-[13px]">
-          <InlineEditField
-            label="Date"
-            type="date"
-            value={p.date ?? ''}
-            onSave={(date) => onPatch({ date: date || null })}
-          />
-          <InlineEditField
-            label="Type"
-            value={p.type ?? ''}
-            onSave={(type) => onPatch({ type: type || null })}
-          />
-          <InlineEditField
-            label="First author"
-            value={p.firstAuthor ?? ''}
-            onSave={(firstAuthor) => onPatch({ firstAuthor: firstAuthor || null })}
-          />
-          <InlineEditField
-            label="Other authors"
-            value={p.otherAuthors ?? ''}
-            onSave={(otherAuthors) => onPatch({ otherAuthors: otherAuthors || null })}
-          />
-          <InlineEditField
-            label="Outlet / publisher"
-            value={p.outlet ?? ''}
-            onSave={(outlet) => onPatch({ outlet: outlet || null })}
-          />
-          <InlineEditField
-            label="Link / DOI"
-            value={p.link ?? ''}
-            onSave={(link) => onPatch({ link: link || null })}
-          />
-          <InlineEditField
-            label="Work package"
-            value={p.workPackage ?? ''}
-            onSave={(workPackage) => onPatch({ workPackage: workPackage || null })}
-          />
-          <InlineEditField
-            label="Target audience"
-            value={p.targetAudience ?? ''}
-            onSave={(targetAudience) => onPatch({ targetAudience: targetAudience || null })}
-          />
-          <InlineEditField
-            label="Purpose"
-            value={p.purpose ?? ''}
-            multiline
-            onSave={(purpose) => onPatch({ purpose: purpose || null })}
-          />
-          {p.link && (
+    <div className="data-detail-panel fade-in">
+      <div className="flex flex-wrap items-center gap-1.5 mb-2">
+        {p.type && (
+          <span className={classNames('chip text-[10px] py-0.5 px-1.5', chipClass)}>{p.type}</span>
+        )}
+        {p.date && <span className="text-[12px] text-gray-500">{formatDate(p.date)}</span>}
+        {p.inCollections != null && (
+          <span className="chip chip-gray text-[10px] py-0.5 px-1.5">
+            Collections: {p.inCollections ? 'Yes' : 'No'}
+          </span>
+        )}
+      </div>
+      {definition && (
+        <p className="text-[12px] text-gray-500 leading-snug mb-2 max-w-3xl">{definition}</p>
+      )}
+      <p className="text-[11px] text-gray-400 mb-4">Double-click any field to edit · autosaves</p>
+
+      <div className="data-detail-grid">
+        <InlineEditField
+          label="Title"
+          value={p.title}
+          onSave={(title) => onPatch({ title: title || p.title })}
+        />
+        <InlineEditField
+          label="Date"
+          type="date"
+          value={p.date ?? ''}
+          onSave={(date) => onPatch({ date: date || null })}
+        />
+        <InlineEditField
+          label="Publication type"
+          value={p.type ?? ''}
+          onSave={(type) => onPatch({ type: type || null })}
+        />
+        <InlineEditField
+          label="First author"
+          value={p.firstAuthor ?? ''}
+          onSave={(firstAuthor) => onPatch({ firstAuthor: firstAuthor || null })}
+        />
+        <InlineEditField
+          label="Other authors"
+          value={p.otherAuthors ?? ''}
+          onSave={(otherAuthors) => onPatch({ otherAuthors: otherAuthors || null })}
+        />
+        <InlineEditField
+          label="Publication name / outlet"
+          value={p.outlet ?? ''}
+          onSave={(outlet) => onPatch({ outlet: outlet || null })}
+        />
+        <InlineEditField
+          label="Full DOI"
+          value={p.doi ?? ''}
+          onSave={(doi) => onPatch({ doi: doi || null })}
+        />
+        <InlineEditField
+          label="External link"
+          value={p.externalLink ?? ''}
+          onSave={(externalLink) => onPatch({ externalLink: externalLink || null })}
+        />
+        <InlineEditField
+          label="UNU Collections link"
+          value={p.collectionsLink ?? ''}
+          onSave={(collectionsLink) => onPatch({ collectionsLink: collectionsLink || null })}
+        />
+        <InlineEditField
+          label="URL"
+          value={p.url ?? ''}
+          onSave={(url) => onPatch({ url: url || null })}
+        />
+        <InlineEditField
+          label="ISBN"
+          value={p.isbn ?? ''}
+          onSave={(isbn) => onPatch({ isbn: isbn || null })}
+        />
+        <InlineEditField
+          label="Pelikan project ID"
+          value={p.pelikanProjectId ?? ''}
+          onSave={(pelikanProjectId) => onPatch({ pelikanProjectId: pelikanProjectId || null })}
+        />
+        <InlineEditField
+          label="Files"
+          value={p.files ?? ''}
+          onSave={(files) => onPatch({ files: files || null })}
+        />
+        <InlineEditField
+          label="Work package"
+          value={p.workPackage ?? ''}
+          onSave={(workPackage) => onPatch({ workPackage: workPackage || null })}
+        />
+        <InlineEditField
+          label="Target audience"
+          value={p.targetAudience ?? ''}
+          onSave={(targetAudience) => onPatch({ targetAudience: targetAudience || null })}
+        />
+        <InlineEditField
+          label="In UNU Collections (Yes/No)"
+          value={p.inCollections == null ? '' : p.inCollections ? 'Yes' : 'No'}
+          onSave={(v) => {
+            const s = v.trim().toLowerCase();
+            if (!s) onPatch({ inCollections: null });
+            else if (s.startsWith('y')) onPatch({ inCollections: true });
+            else if (s.startsWith('n')) onPatch({ inCollections: false });
+          }}
+        />
+        <InlineEditField
+          label="Global South focus (Yes/No)"
+          value={p.globalSouth == null ? '' : p.globalSouth ? 'Yes' : 'No'}
+          onSave={(v) => {
+            const s = v.trim().toLowerCase();
+            if (!s) onPatch({ globalSouth: null });
+            else if (s.startsWith('y')) onPatch({ globalSouth: true });
+            else if (s.startsWith('n')) onPatch({ globalSouth: false });
+          }}
+        />
+      </div>
+
+      <div className="mt-4">
+        <InlineEditField
+          label="Full citation"
+          value={p.fullCitation ?? ''}
+          multiline
+          onSave={(fullCitation) => onPatch({ fullCitation: fullCitation || null })}
+        />
+      </div>
+      <div className="mt-2">
+        <InlineEditField
+          label="Comments / purpose"
+          value={p.purpose ?? ''}
+          multiline
+          onSave={(purpose) => onPatch({ purpose: purpose || null })}
+        />
+      </div>
+
+      {links.length > 0 && (
+        <div className="mt-4 flex flex-wrap gap-3">
+          {links.map((l) => (
             <a
-              href={p.link}
+              key={l.label}
+              href={l.href}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 text-un-blue hover:underline mt-3"
+              className="inline-flex items-center gap-1.5 text-[12px] text-un-blue hover:underline"
             >
-              <LinkIcon className="w-3.5 h-3.5" />
-              Open link / DOI
+              <LinkIcon className="w-3.5 h-3.5" strokeWidth={1.75} />
+              Open {l.label}
             </a>
-          )}
+          ))}
         </div>
-        <div className="px-5 py-3 border-t border-rule flex flex-wrap gap-2 shrink-0">
-          <button type="button" onClick={onAskNexus} className="btn btn-primary btn-sm">
-            <MessageSquare className="w-3.5 h-3.5" />
-            Ask Nexus
-          </button>
-          <button type="button" onClick={onDelete} className="btn btn-ghost btn-sm text-red-600">
-            <Trash2 className="w-3.5 h-3.5" />
-            Delete
-          </button>
-        </div>
-      </aside>
-    </>
+      )}
+
+      <div className="mt-5 flex flex-wrap gap-2">
+        <button type="button" onClick={onAskNexus} className="btn btn-secondary btn-sm">
+          <MessageSquare className="w-3.5 h-3.5" />
+          Ask Nexus
+        </button>
+      </div>
+    </div>
   );
 }
