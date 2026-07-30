@@ -13,12 +13,12 @@ interface Props {
 interface PendingImport {
   filename: string;
   result: ParseResult;
+  count: number;
 }
 
 /**
- * Lets staff re-import the events matrix / publication mastersheet they
- * already maintain. Parses in the browser, previews what will change, then
- * merges into the local stores (imported rows win by id).
+ * Import an .xlsx / .xls / .csv mastersheet. Events and publications start
+ * empty — staff load their own files; nothing is hardcoded into the app.
  */
 export default function SpreadsheetImport({ kind }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -28,6 +28,8 @@ export default function SpreadsheetImport({ kind }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const label = kind === 'events' ? 'events matrix' : 'publication mastersheet';
+  const existingCount =
+    kind === 'events' ? eventsStore.get().filter((e) => e.title.trim()).length : publicationsStore.get().length;
 
   async function onFile(file: File | null) {
     if (!file) return;
@@ -41,12 +43,17 @@ export default function SpreadsheetImport({ kind }: Props) {
     try {
       const tables = await readSpreadsheet(file);
       const result = parseTables(tables);
-      if (result.events.length === 0 && result.publications.length === 0) {
-        setError(
-          `No events or publications found in ${file.name}. Expected the mastersheet column headers (e.g. "Event title" or "Publication type").`
-        );
+      const count =
+        kind === 'events' ? result.events.length : result.publications.length;
+
+      if (count === 0) {
+        const hint =
+          kind === 'events'
+            ? 'Expected an events sheet with columns like "Event Name" / "Event title", date, and event type (.xlsx works).'
+            : 'Expected a publications sheet with "Title", "Publication type", or "First author".';
+        setError(`No ${kind} found in ${file.name}. ${hint}`);
       } else {
-        setPending({ filename: file.name, result });
+        setPending({ filename: file.name, result, count });
       }
     } catch (err) {
       setError(
@@ -60,27 +67,36 @@ export default function SpreadsheetImport({ kind }: Props) {
 
   function confirmImport() {
     if (!pending) return;
-    const parts: string[] = [];
-    if (pending.result.events.length > 0) {
-      const s = eventsStore.merge(pending.result.events);
-      parts.push(`${s.added} new + ${s.updated} updated events`);
+    if (kind === 'events') {
+      // From-scratch load: replace the register with the file contents.
+      // Re-import of an updated matrix also replaces so the sheet is source of truth.
+      eventsStore.hydrate(pending.result.events);
+      setNote(
+        `Loaded ${pending.result.events.length} events from ${pending.filename}.`
+      );
+    } else {
+      publicationsStore.hydrate(pending.result.publications);
+      setNote(
+        `Loaded ${pending.result.publications.length} publications from ${pending.filename}.`
+      );
     }
-    if (pending.result.publications.length > 0) {
-      const s = publicationsStore.merge(pending.result.publications);
-      parts.push(`${s.added} new + ${s.updated} updated publications`);
-    }
-    setNote(`Imported from ${pending.filename}: ${parts.join(', ')}.`);
     setPending(null);
   }
 
-  function resetData() {
+  function clearData() {
+    if (
+      !window.confirm(
+        kind === 'events'
+          ? 'Clear all events? You can re-import an .xlsx anytime.'
+          : 'Clear all publications? You can re-import an .xlsx anytime.'
+      )
+    ) {
+      return;
+    }
     if (kind === 'events') eventsStore.reset();
     else publicationsStore.reset();
-    setNote(kind === 'events' ? 'Cleared all events.' : 'Restored the bundled mastersheet data.');
+    setNote(kind === 'events' ? 'Cleared all events.' : 'Cleared all publications.');
   }
-
-  const hasImports =
-    kind === 'events' ? eventsStore.hasImports() : publicationsStore.hasImports();
 
   return (
     <>
@@ -95,7 +111,7 @@ export default function SpreadsheetImport({ kind }: Props) {
         type="button"
         onClick={() => fileInputRef.current?.click()}
         disabled={busy}
-        title={`Import an updated ${label} (.xlsx/.csv)`}
+        title={`Import ${label} (.xlsx preferred)`}
         className="btn btn-secondary btn-sm"
       >
         {busy ? (
@@ -103,13 +119,13 @@ export default function SpreadsheetImport({ kind }: Props) {
         ) : (
           <Upload className="w-3.5 h-3.5" />
         )}
-        Import
+        Import .xlsx
       </button>
-      {hasImports && (
+      {existingCount > 0 && (
         <button
           type="button"
-          onClick={resetData}
-          title="Discard imported data and restore the bundled mastersheet"
+          onClick={clearData}
+          title="Clear all rows"
           className="btn btn-ghost btn-sm text-gray-500"
         >
           <RotateCcw className="w-3.5 h-3.5" />
@@ -162,31 +178,28 @@ export default function SpreadsheetImport({ kind }: Props) {
               </div>
             </div>
             <div className="px-5 py-4 text-[13px] text-gray-700 space-y-2">
-              {pending.result.events.length > 0 && (
-                <div>
-                  <strong>{pending.result.events.length}</strong> event
-                  {pending.result.events.length === 1 ? '' : 's'} found — rows matching an
-                  existing event (same title and date) will be updated, the rest added.
-                </div>
-              )}
-              {pending.result.publications.length > 0 && (
-                <div>
-                  <strong>{pending.result.publications.length}</strong> publication
-                  {pending.result.publications.length === 1 ? '' : 's'} found — rows matching
-                  an existing title will be updated, the rest added.
-                </div>
-              )}
-              <div className="text-[12px] text-gray-500">
-                Changes are saved to your local data folder when running the dev server
-                (data/local/*.json). You can restore the bundled mastersheet at any time.
+              <div>
+                <strong>{pending.count}</strong> {kind === 'events' ? 'event' : 'publication'}
+                {pending.count === 1 ? '' : 's'} found in this workbook.
               </div>
+              {existingCount > 0 ? (
+                <div className="text-[12px] text-gray-500">
+                  This will replace the current {existingCount} {kind} with the file contents.
+                  Changes sync to Supabase when connected.
+                </div>
+              ) : (
+                <div className="text-[12px] text-gray-500">
+                  The register is empty — this will load the file from scratch. Changes sync to
+                  Supabase when connected.
+                </div>
+              )}
             </div>
             <div className="px-5 py-3 border-t border-rule flex items-center justify-end gap-2 bg-gray-50">
               <button type="button" onClick={() => setPending(null)} className="btn btn-ghost btn-sm">
                 Cancel
               </button>
               <button type="button" onClick={confirmImport} className="btn btn-primary btn-sm">
-                Import
+                {existingCount > 0 ? 'Replace & import' : 'Import'}
               </button>
             </div>
           </div>

@@ -117,10 +117,10 @@ export default function AppShell() {
           <Menu className="w-5 h-5" strokeWidth={1.75} />
         </button>
         <BrandMark
-          emblemSize={28}
+          emblemSize={34}
           org="UNU Global Health"
-          nameClassName="text-[15px] font-bold leading-none tracking-tight"
-          orgClassName="text-[9px]"
+          nameClassName="text-[17px] font-bold leading-none tracking-tight"
+          orgClassName="text-[10px]"
         />
       </div>
       <div className="flex flex-1 min-h-0">

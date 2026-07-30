@@ -1584,26 +1584,49 @@
   display: none;
 }
 
-.publications-sheet {
-  border: 1px solid rgb(var(--rule));
+.inline-edit-display {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 0.15rem 0.25rem;
+  margin: -0.15rem -0.25rem;
   border-radius: 2px;
-  background: rgb(var(--surface));
-  overflow: hidden;
+  border: 1px solid transparent;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+  cursor: text;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.publications-sheet-hint {
-  margin: 0;
-  padding: 0.65rem 0.85rem;
-  font-size: 0.75rem;
-  line-height: 1.45;
-  color: rgb(var(--ink-muted));
-  border-bottom: 1px solid rgb(var(--rule));
-  background: rgb(var(--surface-muted));
+.inline-edit-display:hover {
+  background: rgba(0, 110, 182, 0.06);
+  border-color: rgba(0, 110, 182, 0.15);
 }
 
-.publications-sheet .dsg-container {
-  border: none !important;
+.inline-edit-input {
+  display: block;
+  width: 100%;
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+  line-height: inherit;
+  color: rgb(var(--ink));
+  background: #fff;
+  border: 1px solid rgba(0, 110, 182, 0.45);
+  border-radius: 2px;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(0, 110, 182, 0.12);
 }
+
+.inline-edit-textarea {
+  resize: vertical;
+  min-height: 4.5rem;
+}
+
+
+
 
 /* ---------- Login page ---------- */
 .login-page {
@@ -1707,10 +1730,10 @@
 }
 
 .login-brand-name {
-  font-size: clamp(1.75rem, 3vw, 2.125rem);
+  font-size: clamp(2.25rem, 4vw, 2.75rem);
   font-weight: 700;
   letter-spacing: -0.02em;
-  line-height: 1.1;
+  line-height: 1.05;
 }
 
 .login-brand-mark .brand-name {
@@ -1718,12 +1741,16 @@
 }
 
 .login-brand-mark .brand-org {
-  color: rgba(255, 255, 255, 0.82);
-  font-size: 0.75rem;
-  letter-spacing: 0.1em;
-  max-width: 20rem;
+  color: rgba(255, 255, 255, 0.88);
+  font-size: 0.9375rem;
+  letter-spacing: 0.08em;
+  max-width: 24rem;
   text-transform: none;
   font-weight: 500;
+}
+
+.login-brand-mark .brand-mark {
+  gap: 1rem;
 }
 
 .login-brand-org {

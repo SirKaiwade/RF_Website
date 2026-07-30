@@ -127,8 +127,8 @@ export default function ConversationsSidebar({
             <img
               src="/un/emblem.svg"
               alt=""
-              width={28}
-              height={24}
+              width={34}
+              height={29}
               className="brand-emblem mt-1"
               draggable={false}
             />
@@ -193,9 +193,10 @@ export default function ConversationsSidebar({
         >
           <div className="px-4 py-4 border-b border-rule flex items-start justify-between gap-2">
             <BrandMark
-              emblemSize={44}
+              emblemSize={56}
               org="UNU Global Health"
-              nameClassName="text-[17px] font-bold leading-none tracking-tight"
+              nameClassName="text-[20px] font-bold leading-none tracking-tight"
+              orgClassName="text-[11px] tracking-[0.08em]"
             />
             <div className="flex items-center gap-0.5 shrink-0">
               <button

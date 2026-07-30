@@ -7,12 +7,9 @@ import {
   FileText,
   Link as LinkIcon,
   MessageSquare,
-  Pencil,
   Plus,
-  Sheet,
   Trash2,
   Users,
-  List,
 } from 'lucide-react';
 import type { Publication } from '../types';
 import {
@@ -22,14 +19,14 @@ import {
   PUBLICATION_TYPES,
   publicationsStore,
 } from '../data/publications';
-import PublicationsSheetEditor from './PublicationsSheetEditor';
-import PublicationEditor from './PublicationEditor';
 import SpreadsheetImport from './SpreadsheetImport';
+import InlineEditField from './InlineEditField';
 import { useLocalDataInfo } from '../lib/localDataSync';
 import { classNames, formatDate } from '../lib/format';
 import type { ShellContext } from './AppShell';
-import { EmptyState, FilterChip, MetaSummary, PageHeader, SearchField, SegmentedControl } from './ui';
+import { EmptyState, FilterChip, MetaSummary, PageHeader, SearchField } from './ui';
 import { makeRecordId } from '../lib/recordId';
+import { emptyPublication } from '../lib/recordTemplates';
 
 const TYPE_CHIP_COLORS = ['chip-blue', 'chip-green', 'chip-amber', 'chip-teal', 'chip-red'];
 
@@ -39,8 +36,6 @@ function typeChipClass(type: string | null): string {
   return i === -1 ? 'chip-gray' : TYPE_CHIP_COLORS[i % TYPE_CHIP_COLORS.length];
 }
 
-type ViewMode = 'list' | 'sheet';
-
 export default function PublicationsPage() {
   const ctx = useOutletContext<ShellContext>();
   const navigate = useNavigate();
@@ -48,19 +43,14 @@ export default function PublicationsPage() {
   const publications = publicationsStore.use();
   const dataInfo = useLocalDataInfo();
 
-  const [view, setView] = useState<ViewMode>('list');
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
-  const [wpFilter, setWpFilter] = useState<string>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [editing, setEditing] = useState<Publication | null>(null);
 
   useEffect(() => {
     const open = searchParams.get('open');
     if (open) {
       setSelectedId(open);
-      setView('list');
       setSearchParams({}, { replace: true });
     }
   }, [searchParams, setSearchParams]);
@@ -69,39 +59,42 @@ export default function PublicationsPage() {
     const counts = new Map<string, number>();
     for (const t of PUBLICATION_TYPES) counts.set(t, 0);
     for (const p of publications) {
-      if (p.type && counts.has(p.type)) {
-        counts.set(p.type, (counts.get(p.type) ?? 0) + 1);
-      }
+      if (p.type) counts.set(p.type, (counts.get(p.type) ?? 0) + 1);
     }
     return counts;
   }, [publications]);
 
-  const workPackages = useMemo(() => {
-    const set = new Set<string>();
-    publications.forEach((p) => p.workPackage && set.add(p.workPackage));
-    return [...set].sort();
-  }, [publications]);
+  const filterTypes = useMemo(() => {
+    // Canonical key order first, then any leftover imported labels
+    const extras = [...typeCounts.keys()].filter(
+      (t) => !(PUBLICATION_TYPES as readonly string[]).includes(t) && (typeCounts.get(t) ?? 0) > 0
+    );
+    return [...PUBLICATION_TYPES, ...extras.sort()];
+  }, [typeCounts]);
 
   const stats = useMemo(() => {
     const peerReviewed = publications.filter((p) => p.type === 'Journal article').length;
     const withLink = publications.filter((p) => p.link).length;
-    return { total: publications.length, peerReviewed, withLink };
+    return {
+      total: publications.filter((p) => p.title.trim()).length,
+      peerReviewed,
+      withLink,
+    };
   }, [publications]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return publications
       .filter((p) => {
-        if (!p.title.trim() && view === 'list') return false;
+        if (!p.title.trim()) return false;
         if (typeFilter !== 'all' && p.type !== typeFilter) return false;
-        if (wpFilter !== 'all' && p.workPackage !== wpFilter) return false;
         if (!q) return true;
-        return [p.title, p.firstAuthor, p.otherAuthors, p.outlet, p.workPackage, p.purpose]
+        return [p.title, p.firstAuthor, p.otherAuthors, p.outlet, p.purpose, p.type]
           .filter(Boolean)
           .some((v) => v!.toLowerCase().includes(q));
       })
       .sort((a, b) => (b.date ?? '').localeCompare(a.date ?? '') || a.title.localeCompare(b.title));
-  }, [publications, query, typeFilter, wpFilter, view]);
+  }, [publications, query, typeFilter]);
 
   const selected = selectedId ? getPublication(selectedId) ?? null : null;
 
@@ -110,22 +103,20 @@ export default function PublicationsPage() {
     navigate('/');
   }
 
-  function openAdd() {
-    setEditing(null);
-    setEditorOpen(true);
+  function patchPublication(id: string, patch: Partial<Publication>) {
+    const current = getPublication(id);
+    if (!current) return;
+    publicationsStore.update({ ...current, ...patch });
   }
 
-  function openEdit(p: Publication) {
-    setEditing(p);
-    setEditorOpen(true);
-  }
-
-  function savePublication(record: Publication) {
-    const id = record.id || makeRecordId('pub', record.title.toLowerCase());
-    const next = { ...record, id };
-    if (editing) publicationsStore.update(next);
-    else publicationsStore.add(next);
-    setSelectedId(id);
+  function addBlank() {
+    const blank = {
+      ...emptyPublication(),
+      id: makeRecordId('pub', `new-${Date.now()}`),
+      title: 'Untitled publication',
+    };
+    publicationsStore.add(blank);
+    setSelectedId(blank.id);
   }
 
   function deletePublication(p: Publication) {
@@ -144,34 +135,21 @@ export default function PublicationsPage() {
       <PageHeader
         icon={BookOpen}
         title="Publications"
-        subtitle={`${publications.filter((p) => p.title.trim()).length} outputs${dataInfo.label ? ` · ${dataInfo.label}` : ''}`}
+        subtitle={`${stats.total} outputs${dataInfo.label ? ` · ${dataInfo.label}` : ''}`}
         search={
-          view === 'list' ? (
-            <SearchField
-              value={query}
-              onChange={setQuery}
-              placeholder="Search publications…"
-              className="hidden sm:block"
-            />
-          ) : undefined
+          <SearchField
+            value={query}
+            onChange={setQuery}
+            placeholder="Search publications…"
+            className="hidden sm:block"
+          />
         }
         actions={
           <>
-            <SegmentedControl
-              ariaLabel="View mode"
-              value={view}
-              onChange={setView}
-              options={[
-                { value: 'list', label: 'List', icon: List },
-                { value: 'sheet', label: 'Sheet', icon: Sheet },
-              ]}
-            />
-            {view === 'list' && (
-              <button type="button" onClick={openAdd} className="btn btn-secondary btn-sm">
-                <Plus className="w-3.5 h-3.5" />
-                Add
-              </button>
-            )}
+            <button type="button" onClick={addBlank} className="btn btn-secondary btn-sm">
+              <Plus className="w-3.5 h-3.5" />
+              Add
+            </button>
             <SpreadsheetImport kind="publications" />
           </>
         }
@@ -180,12 +158,12 @@ export default function PublicationsPage() {
       <div className="toolbar">
         <FilterChip
           active={typeFilter === 'all'}
-          count={publications.filter((p) => p.title.trim()).length}
+          count={stats.total}
           onClick={() => setTypeFilter('all')}
         >
           All
         </FilterChip>
-        {PUBLICATION_TYPES.map((type) => (
+        {filterTypes.map((type) => (
           <FilterChip
             key={type}
             active={typeFilter === type}
@@ -195,32 +173,16 @@ export default function PublicationsPage() {
             {type}
           </FilterChip>
         ))}
-
-        <select
-          value={wpFilter}
-          onChange={(e) => setWpFilter(e.target.value)}
-          className="select w-auto max-w-[240px] py-1.5 text-[12px] ml-auto"
-          aria-label="Filter by work package"
-        >
-          <option value="all">All work packages</option>
-          {workPackages.map((wp) => (
-            <option key={wp} value={wp}>
-              {wp}
-            </option>
-          ))}
-        </select>
       </div>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
         <div className="max-w-[1600px] mx-auto px-5 lg:px-8 py-5 lg:py-6 space-y-4">
-          {view === 'list' && (
-            <SearchField
-              value={query}
-              onChange={setQuery}
-              placeholder="Search publications…"
-              className="sm:hidden max-w-none"
-            />
-          )}
+          <SearchField
+            value={query}
+            onChange={setQuery}
+            placeholder="Search publications…"
+            className="sm:hidden max-w-none"
+          />
 
           <MetaSummary
             items={[
@@ -232,25 +194,12 @@ export default function PublicationsPage() {
 
           <PublicationTypeKey />
 
-          {view === 'sheet' ? (
-            <PublicationsSheetEditor rows={publications} />
-          ) : publications.filter((p) => p.title.trim()).length === 0 ? (
+          {stats.total === 0 ? (
             <EmptyState
               icon={BookOpen}
               title="No publications yet"
-              description="Browse in list view, or switch to Sheet to paste your mastersheet from Excel. You can also add one at a time."
-              action={
-                <div className="flex flex-wrap gap-2 justify-center">
-                  <button type="button" onClick={() => setView('sheet')} className="btn btn-primary btn-sm">
-                    <Sheet className="w-3.5 h-3.5" />
-                    Open sheet editor
-                  </button>
-                  <button type="button" onClick={openAdd} className="btn btn-secondary btn-sm">
-                    <Plus className="w-3.5 h-3.5" />
-                    Add a publication
-                  </button>
-                </div>
-              }
+              description="Import your publications workbook (.xlsx). Nothing is hardcoded — load 2023–2025 from scratch. Double-click any field to edit; changes save automatically."
+              action={<SpreadsheetImport kind="publications" />}
             />
           ) : filtered.length === 0 ? (
             <div className="text-center text-[13px] text-gray-500 py-16 border border-dashed border-rule rounded-sm">
@@ -274,22 +223,14 @@ export default function PublicationsPage() {
         </div>
       </div>
 
-      {view === 'list' && selected && (
+      {selected && (
         <PublicationDetail
           publication={selected}
           chipClass={typeChipClass(selected.type)}
           onClose={() => setSelectedId(null)}
           onAskNexus={() => askNexusAbout(selected)}
-          onEdit={() => openEdit(selected)}
+          onPatch={(patch) => patchPublication(selected.id, patch)}
           onDelete={() => deletePublication(selected)}
-        />
-      )}
-
-      {editorOpen && (
-        <PublicationEditor
-          initial={editing ?? undefined}
-          onClose={() => setEditorOpen(false)}
-          onSave={savePublication}
         />
       )}
     </section>
@@ -399,14 +340,14 @@ function PublicationDetail({
   chipClass,
   onClose,
   onAskNexus,
-  onEdit,
+  onPatch,
   onDelete,
 }: {
   publication: Publication;
   chipClass: string;
   onClose: () => void;
   onAskNexus: () => void;
-  onEdit: () => void;
+  onPatch: (patch: Partial<Publication>) => void;
   onDelete: () => void;
 }) {
   const definition =
@@ -428,46 +369,75 @@ function PublicationDetail({
             {p.type && (
               <span className={classNames('chip text-[10px] mb-2', chipClass)}>{p.type}</span>
             )}
-            <h2 className="text-[16px] font-semibold text-ink leading-snug">{p.title}</h2>
+            <h2 className="text-[16px] font-semibold text-ink leading-snug">
+              <InlineEditField
+                value={p.title}
+                onSave={(title) => onPatch({ title: title || p.title })}
+              />
+            </h2>
             {definition && (
               <p className="mt-2 text-[12px] text-gray-500 leading-snug">{definition}</p>
             )}
+            <p className="mt-2 text-[11px] text-gray-400">Double-click any field to edit · autosaves</p>
           </div>
           <button type="button" onClick={onClose} className="btn btn-ghost btn-sm" aria-label="Close">
             ✕
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 text-[13px]">
-          {formatAuthors(p) && (
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">Authors</div>
-              <div>{formatAuthors(p)}</div>
-            </div>
-          )}
-          {p.outlet && (
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">Outlet</div>
-              <div>{p.outlet}</div>
-            </div>
-          )}
-          {p.date && (
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">Date</div>
-              <div>{formatDate(p.date)}</div>
-            </div>
-          )}
-          {p.purpose && (
-            <div>
-              <div className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">Purpose</div>
-              <div className="leading-relaxed">{p.purpose}</div>
-            </div>
-          )}
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-1 text-[13px]">
+          <InlineEditField
+            label="Date"
+            type="date"
+            value={p.date ?? ''}
+            onSave={(date) => onPatch({ date: date || null })}
+          />
+          <InlineEditField
+            label="Type"
+            value={p.type ?? ''}
+            onSave={(type) => onPatch({ type: type || null })}
+          />
+          <InlineEditField
+            label="First author"
+            value={p.firstAuthor ?? ''}
+            onSave={(firstAuthor) => onPatch({ firstAuthor: firstAuthor || null })}
+          />
+          <InlineEditField
+            label="Other authors"
+            value={p.otherAuthors ?? ''}
+            onSave={(otherAuthors) => onPatch({ otherAuthors: otherAuthors || null })}
+          />
+          <InlineEditField
+            label="Outlet / publisher"
+            value={p.outlet ?? ''}
+            onSave={(outlet) => onPatch({ outlet: outlet || null })}
+          />
+          <InlineEditField
+            label="Link / DOI"
+            value={p.link ?? ''}
+            onSave={(link) => onPatch({ link: link || null })}
+          />
+          <InlineEditField
+            label="Work package"
+            value={p.workPackage ?? ''}
+            onSave={(workPackage) => onPatch({ workPackage: workPackage || null })}
+          />
+          <InlineEditField
+            label="Target audience"
+            value={p.targetAudience ?? ''}
+            onSave={(targetAudience) => onPatch({ targetAudience: targetAudience || null })}
+          />
+          <InlineEditField
+            label="Purpose"
+            value={p.purpose ?? ''}
+            multiline
+            onSave={(purpose) => onPatch({ purpose: purpose || null })}
+          />
           {p.link && (
             <a
               href={p.link}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex items-center gap-1.5 text-un-blue hover:underline"
+              className="inline-flex items-center gap-1.5 text-un-blue hover:underline mt-3"
             >
               <LinkIcon className="w-3.5 h-3.5" />
               Open link / DOI
@@ -478,10 +448,6 @@ function PublicationDetail({
           <button type="button" onClick={onAskNexus} className="btn btn-primary btn-sm">
             <MessageSquare className="w-3.5 h-3.5" />
             Ask Nexus
-          </button>
-          <button type="button" onClick={onEdit} className="btn btn-secondary btn-sm">
-            <Pencil className="w-3.5 h-3.5" />
-            Edit
           </button>
           <button type="button" onClick={onDelete} className="btn btn-ghost btn-sm text-red-600">
             <Trash2 className="w-3.5 h-3.5" />

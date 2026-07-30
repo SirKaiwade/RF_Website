@@ -1,29 +1,24 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import {
   CalendarDays,
   MapPin,
   Users,
-  ExternalLink,
   Video,
   Blend,
   MessageSquare,
-  Link as LinkIcon,
-  Megaphone,
-  Newspaper,
-  FileText,
   Plus,
   Pencil,
   Trash2,
   ChevronDown,
   ChevronRight,
-  User as UserIcon,
 } from 'lucide-react';
 import type { EventModality, EventType, IIGHEvent } from '../types';
 import { EVENT_TYPES, EVENT_TYPE_DEFINITIONS, eventSortKey, eventsStore } from '../data/events';
 import { eventDateLabel } from '../lib/corpusText';
 import SpreadsheetImport from './SpreadsheetImport';
 import EventEditor from './EventEditor';
+import InlineEditField from './InlineEditField';
 import { useLocalDataInfo } from '../lib/localDataSync';
 import { classNames, formatDate } from '../lib/format';
 import type { ShellContext } from './AppShell';
@@ -268,7 +263,7 @@ export default function EventsPage() {
             <EmptyState
               icon={CalendarDays}
               title="Build the events register"
-              description="Import the events matrix or add events manually. Keep dates, owners, and reach here so Nexus can brief staff from the same source of truth."
+              description="Import your events matrix (.xlsx). Nothing is hardcoded. Expand a row and double-click any field to edit; changes save automatically."
               action={
                 <div className="flex flex-wrap justify-center gap-2">
                   <button type="button" onClick={openAdd} className="btn btn-primary btn-sm">
@@ -332,6 +327,9 @@ export default function EventsPage() {
                             onEdit={() => openEdit(event)}
                             onDelete={() => deleteEvent(event)}
                             onAskNexus={() => askNexusAbout(event)}
+                            onPatch={(patch) => {
+                              eventsStore.update({ ...event, ...patch });
+                            }}
                           />
                         );
                       })}
@@ -362,6 +360,7 @@ function EventRegisterRows({
   onEdit,
   onDelete,
   onAskNexus,
+  onPatch,
 }: {
   event: IIGHEvent;
   open: boolean;
@@ -369,6 +368,7 @@ function EventRegisterRows({
   onEdit: () => void;
   onDelete: () => void;
   onAskNexus: () => void;
+  onPatch: (patch: Partial<IIGHEvent>) => void;
 }) {
   const ModalityIcon = modalityIcon(event.modality);
   const where =
@@ -473,6 +473,7 @@ function EventRegisterRows({
               event={event}
               onAskNexus={onAskNexus}
               onEdit={onEdit}
+              onPatch={onPatch}
             />
           </td>
         </tr>
@@ -485,125 +486,103 @@ function EventDetailPanel({
   event,
   onAskNexus,
   onEdit,
+  onPatch,
 }: {
   event: IIGHEvent;
   onAskNexus: () => void;
   onEdit: () => void;
+  onPatch: (patch: Partial<IIGHEvent>) => void;
 }) {
-  const reach: { label: string; value: string }[] = [];
-  if (event.totalParticipants != null)
-    reach.push({ label: 'Participants', value: event.totalParticipants.toLocaleString() });
-  if (event.countriesRepresented)
-    reach.push({ label: 'Countries', value: event.countriesRepresented });
-  if (event.femalePct != null) reach.push({ label: 'Female', value: `${event.femalePct}%` });
-  else if (event.femaleParticipants != null)
-    reach.push({ label: 'Female', value: event.femaleParticipants.toLocaleString() });
-  if (event.globalSouthPct != null)
-    reach.push({ label: 'Global South', value: `${event.globalSouthPct}%` });
-  else if (event.globalSouthParticipants != null)
-    reach.push({ label: 'Global South', value: event.globalSouthParticipants.toLocaleString() });
-  if (event.youthParticipants != null)
-    reach.push({ label: 'Youth', value: event.youthParticipants.toLocaleString() });
-
-  const links: { label: string; value: string; icon: typeof Newspaper }[] = [];
-  if (event.websiteArticle)
-    links.push({ label: 'Website article', value: event.websiteArticle, icon: Newspaper });
-  if (event.mediaCoverage)
-    links.push({ label: 'Media coverage', value: event.mediaCoverage, icon: Megaphone });
-  if (event.socialMedia)
-    links.push({ label: 'Social media', value: event.socialMedia, icon: LinkIcon });
-  if (event.internalFileLink)
-    links.push({ label: 'Internal files', value: event.internalFileLink, icon: FileText });
-
   return (
     <div className="data-detail-panel fade-in">
-      <div className="flex flex-wrap items-center gap-1.5 mb-3">
+      <div className="flex flex-wrap items-center gap-1.5 mb-2">
         {isUpcoming(event) && (
           <span className="chip chip-blue text-[10px] py-0.5 px-1.5">Upcoming</span>
         )}
-        {event.level !== 'Unspecified' && (
-          <span className="chip chip-gray text-[10px] py-0.5 px-1.5">{event.level}</span>
-        )}
+        <span className={classNames('chip text-[10px] py-0.5 px-1.5', TYPE_CHIP[event.type])}>
+          {event.type}
+        </span>
         <span className="text-[12px] text-gray-500">{eventDateLabel(event)}</span>
       </div>
-
-      {event.description && (
-        <p className="text-[13px] text-gray-700 leading-relaxed whitespace-pre-wrap mb-4">
-          {event.description}
-        </p>
-      )}
+      <p className="text-[11px] text-gray-400 mb-4">Double-click any field to edit · autosaves</p>
 
       <div className="data-detail-grid">
-        {event.owner && <Field label="Owner" value={event.owner} icon={UserIcon} />}
-        {event.partners && <Field label="Partners / co-convenors" value={event.partners} />}
-        {event.funder && <Field label="Funder / donor" value={event.funder} />}
-        {event.programme && <Field label="Programme / flagship" value={event.programme} />}
-        {event.workPackage && <Field label="Work package" value={event.workPackage} />}
-        {event.strategicPurpose && (
-          <Field label="Strategic purpose" value={event.strategicPurpose} />
-        )}
-        {event.modality !== 'Unspecified' && (
-          <Field label="Modality" value={event.modality} />
-        )}
-        {event.location && <Field label="Location" value={event.location} icon={MapPin} />}
+        <InlineEditField
+          label="Title"
+          value={event.title}
+          onSave={(title) => onPatch({ title: title || event.title })}
+        />
+        <InlineEditField
+          label="Date"
+          type="date"
+          value={event.date ?? ''}
+          onSave={(date) => onPatch({ date: date || null })}
+        />
+        <InlineEditField
+          label="Owner / focal point"
+          value={event.owner ?? ''}
+          onSave={(owner) => onPatch({ owner: owner || null })}
+        />
+        <InlineEditField
+          label="Team / work package"
+          value={event.workPackage ?? ''}
+          onSave={(workPackage) => onPatch({ workPackage: workPackage || null })}
+        />
+        <InlineEditField
+          label="Location"
+          value={event.location ?? ''}
+          onSave={(location) => onPatch({ location: location || null })}
+        />
+        <InlineEditField
+          label="Modality"
+          value={event.modality === 'Unspecified' ? '' : event.modality}
+          onSave={(modality) =>
+            onPatch({
+              modality: (modality as IIGHEvent['modality']) || 'Unspecified',
+            })
+          }
+        />
+        <InlineEditField
+          label="Partners / organizers"
+          value={event.partners ?? ''}
+          onSave={(partners) => onPatch({ partners: partners || null })}
+        />
+        <InlineEditField
+          label="Sponsor / funder"
+          value={event.funder ?? ''}
+          onSave={(funder) => onPatch({ funder: funder || null })}
+        />
+        <InlineEditField
+          label="Total participants"
+          value={event.totalParticipants != null ? String(event.totalParticipants) : ''}
+          onSave={(v) => {
+            const n = parseInt(v.replace(/,/g, ''), 10);
+            onPatch({ totalParticipants: Number.isFinite(n) ? n : null });
+          }}
+        />
+        <InlineEditField
+          label="Social media"
+          value={event.socialMedia ?? ''}
+          onSave={(socialMedia) => onPatch({ socialMedia: socialMedia || null })}
+        />
       </div>
 
-      {reach.length > 0 && (
-        <div className="mt-4">
-          <div className="data-field-label mb-2">Reach</div>
-          <div className="flex flex-wrap gap-x-6 gap-y-2">
-            {reach.map((r) => (
-              <div key={r.label}>
-                <div className="text-[15px] font-semibold tabular-nums text-ink">{r.value}</div>
-                <div className="text-[11px] text-gray-500">{r.label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {(event.southSouthExchange ||
-        (event.crossWpCollaboration && /^y/i.test(event.crossWpCollaboration)) ||
-        (event.highLevelParticipants && /^y/i.test(event.highLevelParticipants))) && (
-        <div className="mt-4 flex flex-wrap gap-1.5">
-          {event.southSouthExchange && (
-            <span className="chip chip-green text-[10px]">South-South exchange</span>
-          )}
-          {event.crossWpCollaboration && /^y/i.test(event.crossWpCollaboration) && (
-            <span className="chip chip-blue text-[10px]">Cross-WP collaboration</span>
-          )}
-          {event.highLevelParticipants && /^y/i.test(event.highLevelParticipants) && (
-            <span className="chip chip-amber text-[10px]">High-level participants</span>
-          )}
-        </div>
-      )}
-
-      {event.keyOutputs && (
-        <div className="mt-4">
-          <div className="data-field-label">Key outputs</div>
-          <p className="data-field-value whitespace-pre-wrap mt-1">{event.keyOutputs}</p>
-        </div>
-      )}
-
-      {links.length > 0 && (
-        <div className="mt-4">
-          <div className="data-field-label mb-2">Coverage & links</div>
-          <div className="space-y-2">
-            {links.map((l) => {
-              const Icon = l.icon;
-              return (
-                <div key={l.label} className="flex items-start gap-2 text-[12px]">
-                  <Icon className="w-3.5 h-3.5 text-gray-400 mt-0.5 shrink-0" strokeWidth={1.75} />
-                  <div className="min-w-0">
-                    <div className="text-[11px] text-gray-500 font-medium">{l.label}</div>
-                    <LinkOrText value={l.value} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      <div className="mt-4">
+        <InlineEditField
+          label="Description"
+          value={event.description ?? ''}
+          multiline
+          onSave={(description) => onPatch({ description: description || null })}
+        />
+      </div>
+      <div className="mt-2">
+        <InlineEditField
+          label="Key outputs / impact"
+          value={event.keyOutputs ?? ''}
+          multiline
+          onSave={(keyOutputs) => onPatch({ keyOutputs: keyOutputs || null })}
+        />
+      </div>
 
       <p className="mt-4 text-[11px] text-gray-500 leading-relaxed max-w-3xl">
         {EVENT_TYPE_DEFINITIONS[event.type]}
@@ -616,7 +595,7 @@ function EventDetailPanel({
         </button>
         <button type="button" onClick={onEdit} className="btn btn-ghost btn-sm">
           <Pencil className="w-3.5 h-3.5" />
-          Edit record
+          Full editor
         </button>
         {event.title && (
           <span className="inline-flex items-center">
@@ -629,45 +608,3 @@ function EventDetailPanel({
   );
 }
 
-function Field({
-  label,
-  value,
-  children,
-  icon: Icon,
-}: {
-  label: string;
-  value?: string;
-  children?: ReactNode;
-  icon?: typeof MapPin;
-}) {
-  return (
-    <div>
-      <div className="data-field-label flex items-center gap-1.5">
-        {Icon ? <Icon className="w-3 h-3" strokeWidth={1.75} /> : null}
-        {label}
-      </div>
-      <div className="data-field-value whitespace-pre-wrap">{children ?? value ?? '—'}</div>
-    </div>
-  );
-}
-
-function LinkOrText({ value }: { value: string }) {
-  if (/^https?:\/\//i.test(value.trim())) {
-    const url = value.trim().split(/\s+/)[0];
-    return (
-      <span className="copyable">
-        <a
-          href={url}
-          target="_blank"
-          rel="noreferrer"
-          className="text-un-blue hover:underline break-all inline-flex items-start gap-1"
-        >
-          {url}
-          <ExternalLink className="w-3 h-3 shrink-0 mt-0.5" strokeWidth={1.75} />
-        </a>
-        <CopyButton value={url} label="Copy link" />
-      </span>
-    );
-  }
-  return <span className="whitespace-pre-wrap text-ink">{value}</span>;
-}

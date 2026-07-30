@@ -39,7 +39,7 @@ export default function LoginPage() {
         <div className="login-brand-inner">
           <div className="login-brand-mark">
             <BrandMark
-              emblemSize={64}
+              emblemSize={88}
               variant="light"
               org="UNU Global Health"
               nameClassName="login-brand-name"
@@ -51,8 +51,8 @@ export default function LoginPage() {
             grounded in your sources.
           </h1>
           <p className="login-lead">
-            Search reports, briefs, and project material. Every answer cites the document it came
-            from — so you can verify before you brief.
+            Search reports and project material across UNU Global Health so you can find what you
+            need quickly.
           </p>
 
           <ul className="login-points">
