@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useOutletContext, useSearchParams } from 'react-router-dom';
 import {
   Upload,
   Trash2,
@@ -8,15 +8,39 @@ import {
   FileSpreadsheet,
   FileType,
   Library,
+  Folder,
+  FolderOpen,
+  FolderPlus,
+  ChevronRight,
+  Home,
+  MapPin,
 } from 'lucide-react';
 import {
-  ingestFile,
+  ingestFiles,
   persistDocToCloud,
   removeUploadedDoc,
   useUploadedDocs,
   type UploadedDoc,
 } from '../lib/uploads';
-import { formatBytes, formatRelative, classNames } from '../lib/format';
+import { filesFromDataTransfer } from '../lib/folderDrop';
+import {
+  buildLibraryTree,
+  countFilesRecursive,
+  docBreadcrumbPath,
+  docDisplayName,
+  docFolderPath,
+  docFullPath,
+  folderBreadcrumbPath,
+  getFolderAtPath,
+  joinLibraryPath,
+  libraryFileHref,
+  libraryFolderHref,
+  normalizeLibraryPath,
+  searchLibrary,
+  type LibrarySearchHit,
+  type TreeFolder,
+} from '../lib/libraryTree';
+import { formatBytes, classNames } from '../lib/format';
 import { EmptyState, MetaSummary, PageHeader, SearchField } from './ui';
 import { useAuth } from '../lib/auth';
 import { supabaseConfigured } from '../lib/supabase';
@@ -65,56 +89,175 @@ function hasFilePayload(e: React.DragEvent): boolean {
   return Array.from(types).includes('Files');
 }
 
+function matchKindLabel(kind: LibrarySearchHit['kind']): string {
+  if (kind === 'filename') return 'Filename';
+  if (kind === 'path') return 'Folder path';
+  return 'In document';
+}
+
 export default function LibraryPage() {
   const ctx = useOutletContext<ShellContext>();
   const { user } = useAuth();
   const uploadedDocs = useUploadedDocs();
   const cloud = supabaseConfigured();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState('');
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
+  const [highlightFileId, setHighlightFileId] = useState<string | null>(null);
+  const [extraFolders, setExtraFolders] = useState<string[]>([]);
   const dragDepth = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const highlightTimer = useRef<number | null>(null);
+  const fileRowRefs = useRef<Map<string, HTMLElement>>(new Map());
 
-  const filtered = useMemo(() => {
-    const sorted = [...uploadedDocs].sort((a, b) =>
-      b.uploadedAt.localeCompare(a.uploadedAt)
-    );
-    if (!query.trim()) return sorted;
-    const q = query.toLowerCase();
-    return sorted.filter(
-      (u) =>
-        u.filename.toLowerCase().includes(q) || u.text.toLowerCase().includes(q)
-    );
-  }, [uploadedDocs, query]);
+  const currentPath = normalizeLibraryPath(searchParams.get('path') ?? '');
+  const fileParam = searchParams.get('file');
+
+  const tree = useMemo(
+    () => buildLibraryTree(uploadedDocs, [...extraFolders, currentPath].filter(Boolean)),
+    [uploadedDocs, extraFolders, currentPath]
+  );
+  const currentFolder = useMemo(
+    () => getFolderAtPath(tree, currentPath),
+    [tree, currentPath]
+  );
+
+  const searchHits = useMemo(
+    () => (query.trim() ? searchLibrary(uploadedDocs, query) : []),
+    [uploadedDocs, query]
+  );
 
   const stats = useMemo(() => {
     const pages = uploadedDocs.reduce((sum, d) => sum + (d.pageCount ?? 0), 0);
     const bytes = uploadedDocs.reduce((sum, d) => sum + d.bytes, 0);
-    return { count: uploadedDocs.length, pages, bytes };
-  }, [uploadedDocs]);
+    const folders = tree.folderPaths.length;
+    return { count: uploadedDocs.length, pages, bytes, folders };
+  }, [uploadedDocs, tree.folderPaths.length]);
+
+  const breadcrumbs = useMemo(() => {
+    if (!currentPath) return [] as { name: string; path: string }[];
+    const parts = currentPath.split('/');
+    return parts.map((name, i) => ({
+      name,
+      path: parts.slice(0, i + 1).join('/'),
+    }));
+  }, [currentPath]);
+
+  useEffect(() => {
+    const el = folderInputRef.current;
+    if (!el) return;
+    el.setAttribute('webkitdirectory', '');
+    el.setAttribute('directory', '');
+  }, []);
+
+  // Deep-link: ?file= highlights the row, navigates to its folder, opens viewer.
+  useEffect(() => {
+    if (!fileParam) return;
+    const doc = uploadedDocs.find((d) => d.id === fileParam);
+    if (!doc) {
+      const params = new URLSearchParams();
+      if (currentPath) params.set('path', currentPath);
+      setSearchParams(params, { replace: true });
+      return;
+    }
+    const folder = docFolderPath(doc);
+    if (folder !== currentPath) {
+      const params = new URLSearchParams();
+      if (folder) params.set('path', folder);
+      params.set('file', doc.id);
+      setSearchParams(params, { replace: true });
+      return;
+    }
+    flashHighlight(doc.id);
+    ctx.openDocument(doc.id);
+    const params = new URLSearchParams();
+    if (currentPath) params.set('path', currentPath);
+    setSearchParams(params, { replace: true });
+    // Intentionally omit ctx/setSearchParams — only react to deep-link params.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fileParam, uploadedDocs, currentPath]);
+
+  function flashHighlight(id: string) {
+    setHighlightFileId(id);
+    if (highlightTimer.current) window.clearTimeout(highlightTimer.current);
+    highlightTimer.current = window.setTimeout(() => {
+      setHighlightFileId(null);
+    }, 3200);
+    requestAnimationFrame(() => {
+      fileRowRefs.current.get(id)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+    });
+  }
+
+  function navigateToFolder(path: string) {
+    setQuery('');
+    const params = new URLSearchParams();
+    const norm = normalizeLibraryPath(path);
+    if (norm) params.set('path', norm);
+    setSearchParams(params);
+  }
+
+  function goToSearchHit(hit: LibrarySearchHit) {
+    setQuery('');
+    const params = new URLSearchParams();
+    if (hit.folderPath) params.set('path', hit.folderPath);
+    params.set('file', hit.doc.id);
+    setSearchParams(params);
+  }
 
   async function ingestMany(files: File[]) {
     if (files.length === 0) return;
     setUploading(true);
     setErrors([]);
-    const errs: string[] = [];
-    for (const f of files) {
-      const r = await ingestFile(f);
-      if (!r.ok && r.error) {
-        errs.push(r.error);
-        continue;
-      }
-      if (r.doc && cloud && user?.email) {
-        const saved = await persistDocToCloud(r.doc, user.email);
+    setUploadProgress(null);
+    // Nested folder drops keep their own paths; loose single files land in the open folder.
+    const { docs, errors: errs } = await ingestFiles(files, {
+      skipUnsupported: true,
+      destinationFolder: currentPath || undefined,
+      onProgress: (done, total, filename) => {
+        setUploadProgress(`${done}/${total} · ${filename}`);
+      },
+    });
+    if (cloud && user?.email) {
+      for (const doc of docs) {
+        const saved = await persistDocToCloud(doc, user.email);
         if (!saved.ok && saved.error) {
           errs.push(`Saved locally but not to the shared library: ${saved.error}`);
         }
       }
     }
     setUploading(false);
+    setUploadProgress(null);
     if (errs.length) setErrors(errs);
+
+    // Stay put when uploading into the current folder; jump only for a new top-level tree drop.
+    const nestedDrop = docs.find(
+      (d) =>
+        d.localRelativePath?.includes('/') &&
+        (!currentPath || !d.localRelativePath.startsWith(`${currentPath}/`))
+    );
+    if (nestedDrop?.localRelativePath && !currentPath) {
+      const top = nestedDrop.localRelativePath.split('/')[0];
+      if (top) navigateToFolder(top);
+    }
+  }
+
+  function createFolder() {
+    const raw = window.prompt('New folder name');
+    if (!raw) return;
+    const name = raw.trim().replace(/[\\/]/g, '-');
+    if (!name) return;
+    const next = joinLibraryPath(currentPath, name);
+    setExtraFolders((prev) =>
+      prev.includes(next) ? prev : [...prev, next]
+    );
+    navigateToFolder(next);
   }
 
   function resetDrag() {
@@ -148,7 +291,7 @@ export default function LibraryPage() {
     e.preventDefault();
     e.stopPropagation();
     resetDrag();
-    const files = Array.from(e.dataTransfer.files ?? []);
+    const files = await filesFromDataTransfer(e.dataTransfer);
     if (files.length === 0) return;
     await ingestMany(files);
   }
@@ -165,6 +308,7 @@ export default function LibraryPage() {
   }
 
   const isEmpty = uploadedDocs.length === 0;
+  const searching = query.trim().length > 0;
 
   return (
     <section
@@ -185,126 +329,265 @@ export default function LibraryPage() {
         className="hidden"
         onChange={onPickFiles}
       />
+      <input
+        ref={folderInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={onPickFiles}
+      />
 
       <PageHeader
         icon={Library}
         title="Knowledge library"
         subtitle={
           isEmpty
-            ? 'Upload reports, briefs, and project files · Nexus searches them in chat'
-            : `${stats.count} document${stats.count === 1 ? '' : 's'} · ready for grounded answers`
+            ? 'Upload a folder or files · Nexus finds where numbers and facts live'
+            : stats.folders > 0
+              ? `${stats.count} file${stats.count === 1 ? '' : 's'} in ${stats.folders} folder${stats.folders === 1 ? '' : 's'} · search by name, path, or content`
+              : `${stats.count} document${stats.count === 1 ? '' : 's'} · ready for grounded answers`
         }
         search={
           !isEmpty ? (
             <SearchField
               value={query}
               onChange={setQuery}
-              placeholder="Search library…"
-              className="hidden sm:block"
+              placeholder="Where is…? Search files & content"
+              className="hidden sm:block max-w-sm"
             />
           ) : undefined
         }
         actions={
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="btn btn-primary btn-sm"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            {uploading ? 'Adding…' : 'Upload files'}
-          </button>
+          <div className="flex items-center gap-2">
+            {!isEmpty && (
+              <button
+                type="button"
+                onClick={createFolder}
+                disabled={uploading}
+                className="btn btn-secondary btn-sm"
+                title="Create a folder in the current location"
+              >
+                <FolderPlus className="w-3.5 h-3.5" />
+                <span className="hidden lg:inline">New folder</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => folderInputRef.current?.click()}
+              disabled={uploading}
+              className="btn btn-secondary btn-sm"
+              title="Upload an entire folder tree"
+            >
+              <Folder className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{uploading ? 'Adding…' : 'Upload folder'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="btn btn-primary btn-sm"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              {uploading ? 'Adding…' : 'Upload files'}
+            </button>
+          </div>
         }
       />
 
-      <div className="flex-1 overflow-y-auto">
-        <div className="max-w-5xl mx-auto px-5 lg:px-8 py-6 lg:py-10">
-          {isEmpty ? (
-            <EmptyLibrary
-              onPick={() => fileInputRef.current?.click()}
-              onDragOver={onDragOver}
-              onDrop={onDrop}
-            />
-          ) : (
-            <>
-              <SearchField
-                value={query}
-                onChange={setQuery}
-                placeholder="Search library…"
-                className="sm:hidden mb-4 max-w-none"
-              />
-
-              <MetaSummary
-                items={[
-                  {
-                    label: stats.count === 1 ? 'document' : 'documents',
-                    value: stats.count,
-                  },
-                  ...(stats.pages > 0
-                    ? [{ label: stats.pages === 1 ? 'page' : 'pages', value: stats.pages }]
-                    : []),
-                  { label: 'total size', value: formatBytes(stats.bytes) },
-                ]}
-              />
-
-              <UploadStrip
-                onPick={() => fileInputRef.current?.click()}
-                uploading={uploading}
+      <div className="flex-1 overflow-hidden flex min-h-0">
+        {isEmpty ? (
+          <div className="flex-1 overflow-y-auto">
+            <div className="max-w-5xl mx-auto px-5 lg:px-8 py-6 lg:py-10">
+              <EmptyLibrary
+                onPickFiles={() => fileInputRef.current?.click()}
+                onPickFolder={() => folderInputRef.current?.click()}
                 onDragOver={onDragOver}
                 onDrop={onDrop}
               />
-
-              {errors.length > 0 && (
-                <div className="mt-4 rounded-sm border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-900 fade-in">
-                  <div className="font-semibold mb-1">Some files couldn&apos;t be added</div>
-                  <ul className="space-y-0.5 list-disc pl-5">
-                    {errors.map((er, i) => (
-                      <li key={i}>{er}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              <div className="mt-8">
-                <div className="flex items-baseline justify-between gap-3 mb-4">
-                  <h2 className="text-[15px] font-semibold text-ink tracking-tight">
-                    Documents
-                  </h2>
-                  <span className="text-[12px] text-gray-500">
-                    {filtered.length === uploadedDocs.length
-                      ? `${filtered.length} total`
-                      : `${filtered.length} of ${uploadedDocs.length}`}
-                  </span>
-                </div>
-
-                {filtered.length === 0 ? (
-                  <div className="text-center text-[13px] text-gray-500 py-14 border border-dashed border-rule rounded-sm">
-                    No documents match &ldquo;{query}&rdquo;.
-                  </div>
-                ) : (
-                  <ul className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filtered.map((u, i) => (
-                      <DocCard
-                        key={u.id}
-                        doc={u}
-                        active={ctx.openDocId === u.id}
-                        onOpen={() => ctx.openDocument(u.id)}
-                        onRemove={() => handleRemove(u)}
-                        style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}
-                      />
-                    ))}
-                  </ul>
-                )}
+            </div>
+          </div>
+        ) : (
+          <>
+            <aside className="hidden md:flex w-56 lg:w-64 shrink-0 flex-col border-r border-rule bg-surface-subtle min-h-0">
+              <div className="px-3 py-2.5 border-b border-rule flex items-center justify-between gap-2">
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                  Folders
+                </span>
+                <span className="text-[11px] text-gray-400 tabular-nums">
+                  {stats.folders}
+                </span>
               </div>
+              <nav className="flex-1 overflow-y-auto py-2 px-1.5" aria-label="Folder tree">
+                <FolderTreeNav
+                  folder={tree.root}
+                  currentPath={currentPath}
+                  depth={0}
+                  onNavigate={navigateToFolder}
+                />
+              </nav>
+            </aside>
 
-              <p className="mt-10 text-[12px] text-gray-500 max-w-2xl leading-relaxed">
-                {cloud
-                  ? 'Documents are parsed in your browser and saved to the shared UNU Global Health library so the whole team can search them in chat.'
-                  : 'Documents stay in this browser until Supabase is configured. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to enable the shared library.'}
-              </p>
-            </>
-          )}
-        </div>
+            <div className="flex-1 min-w-0 overflow-y-auto">
+              <div className="max-w-5xl mx-auto px-5 lg:px-8 py-5 lg:py-8">
+                <SearchField
+                  value={query}
+                  onChange={setQuery}
+                  placeholder="Where is…? Search files & content"
+                  className="sm:hidden mb-4 max-w-none"
+                />
+
+                <MetaSummary
+                  items={[
+                    {
+                      label: stats.count === 1 ? 'file' : 'files',
+                      value: stats.count,
+                    },
+                    ...(stats.folders > 0
+                      ? [
+                          {
+                            label: stats.folders === 1 ? 'folder' : 'folders',
+                            value: stats.folders,
+                          },
+                        ]
+                      : []),
+                    ...(stats.pages > 0
+                      ? [
+                          {
+                            label: stats.pages === 1 ? 'page' : 'pages',
+                            value: stats.pages,
+                          },
+                        ]
+                      : []),
+                    { label: 'total size', value: formatBytes(stats.bytes) },
+                  ]}
+                />
+
+                <UploadStrip
+                  onPickFiles={() => fileInputRef.current?.click()}
+                  onPickFolder={() => folderInputRef.current?.click()}
+                  uploading={uploading}
+                  progress={uploadProgress}
+                  destinationLabel={folderBreadcrumbPath(currentPath)}
+                  onDragOver={onDragOver}
+                  onDrop={onDrop}
+                />
+
+                {errors.length > 0 && (
+                  <div className="mt-4 rounded-sm border border-red-200 bg-red-50 px-4 py-3 text-[13px] text-red-900 fade-in">
+                    <div className="font-semibold mb-1">Some files couldn&apos;t be added</div>
+                    <ul className="space-y-0.5 list-disc pl-5">
+                      {errors.map((er, i) => (
+                        <li key={i}>{er}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {searching ? (
+                  <SearchResults
+                    query={query}
+                    hits={searchHits}
+                    onGoTo={goToSearchHit}
+                    onOpen={(doc) => {
+                      goToSearchHit({
+                        doc,
+                        kind: 'filename',
+                        folderPath: docFolderPath(doc),
+                        fullPath: docFullPath(doc),
+                        breadcrumb: docBreadcrumbPath(doc),
+                        href: libraryFileHref(doc),
+                      });
+                    }}
+                  />
+                ) : (
+                  <>
+                    <BreadcrumbBar
+                      crumbs={breadcrumbs}
+                      onNavigate={navigateToFolder}
+                    />
+
+                    <div className="mt-4">
+                      <div className="flex items-baseline justify-between gap-3 mb-3">
+                        <h2 className="text-[15px] font-semibold text-ink tracking-tight">
+                          {currentPath ? currentFolder.name : 'Library root'}
+                        </h2>
+                        <span className="text-[12px] text-gray-500">
+                          {currentFolder.folders.length > 0 &&
+                            `${currentFolder.folders.length} folder${currentFolder.folders.length === 1 ? '' : 's'}`}
+                          {currentFolder.folders.length > 0 &&
+                            currentFolder.files.length > 0 &&
+                            ' · '}
+                          {currentFolder.files.length > 0 &&
+                            `${currentFolder.files.length} file${currentFolder.files.length === 1 ? '' : 's'}`}
+                          {currentFolder.folders.length === 0 &&
+                            currentFolder.files.length === 0 &&
+                            'Empty folder'}
+                        </span>
+                      </div>
+
+                      {currentFolder.folders.length === 0 &&
+                      currentFolder.files.length === 0 ? (
+                        <div className="text-center text-[13px] text-gray-500 py-14 border border-dashed border-rule rounded-sm">
+                          This folder is empty. Upload files or a subfolder here.
+                        </div>
+                      ) : (
+                        <div className="lib-browser list-panel">
+                          {currentFolder.folders.map((folder) => (
+                            <button
+                              key={folder.path}
+                              type="button"
+                              onClick={() => navigateToFolder(folder.path)}
+                              className="lib-browser-row lib-browser-folder"
+                            >
+                              <Folder
+                                className="w-4 h-4 text-un-blue shrink-0"
+                                strokeWidth={1.6}
+                              />
+                              <span className="flex-1 min-w-0 text-left truncate font-medium text-ink">
+                                {folder.name}
+                              </span>
+                              <span className="text-[11px] text-gray-500 tabular-nums shrink-0">
+                                {countFilesRecursive(folder)} file
+                                {countFilesRecursive(folder) === 1 ? '' : 's'}
+                              </span>
+                              <ChevronRight
+                                className="w-3.5 h-3.5 text-gray-400 shrink-0"
+                                strokeWidth={1.75}
+                              />
+                            </button>
+                          ))}
+                          {currentFolder.files.map((doc) => (
+                            <FileRow
+                              key={doc.id}
+                              doc={doc}
+                              active={ctx.openDocId === doc.id}
+                              highlighted={highlightFileId === doc.id}
+                              onOpen={() => {
+                                flashHighlight(doc.id);
+                                ctx.openDocument(doc.id);
+                              }}
+                              onRemove={() => handleRemove(doc)}
+                              rowRef={(el) => {
+                                if (el) fileRowRefs.current.set(doc.id, el);
+                                else fileRowRefs.current.delete(doc.id);
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                <p className="mt-10 text-[12px] text-gray-500 max-w-2xl leading-relaxed">
+                  {cloud
+                    ? 'Upload a whole folder tree — paths are preserved so you can ask Nexus “where are the numbers for X?” and jump straight to the file. Documents sync to the shared UNU Global Health library.'
+                    : 'Upload a whole folder tree — paths are preserved so search and Nexus can tell you exactly where a file lives. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to sync a shared team library.'}
+                </p>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {dragging && (
@@ -313,19 +596,18 @@ export default function LibraryPage() {
           onDragOver={onDragOver}
           onDrop={onDrop}
           onDragLeave={(e) => {
-            // Leaving the overlay itself shouldn't abort a drop onto it.
             if (e.currentTarget === e.target) onDragLeave(e);
           }}
         >
           <div className="text-center px-6 pointer-events-none">
             <div className="w-14 h-14 rounded-sm bg-un-blue text-white flex items-center justify-center mx-auto mb-3">
-              <Upload className="w-7 h-7" strokeWidth={1.5} />
+              <FolderPlus className="w-7 h-7" strokeWidth={1.5} />
             </div>
             <div className="text-[17px] font-semibold text-un-blue-dark tracking-tight">
-              Drop to add to your library
+              Drop folders or files to add
             </div>
             <div className="text-[13px] text-un-blue mt-1">
-              PDF, Word, Excel, .txt, .md
+              Folder structure is kept · PDF, Word, Excel, .txt, .md
             </div>
           </div>
         </div>
@@ -334,37 +616,305 @@ export default function LibraryPage() {
   );
 }
 
+function FolderTreeNav({
+  folder,
+  currentPath,
+  depth,
+  onNavigate,
+}: {
+  folder: TreeFolder;
+  currentPath: string;
+  depth: number;
+  onNavigate: (path: string) => void;
+}) {
+  const isRoot = folder.path === '';
+  const isActive = currentPath === folder.path;
+  const isAncestor =
+    !isRoot &&
+    (currentPath === folder.path || currentPath.startsWith(`${folder.path}/`));
+  const [open, setOpen] = useState(depth < 2 || isAncestor);
+
+  useEffect(() => {
+    if (isAncestor) setOpen(true);
+  }, [isAncestor]);
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => {
+          onNavigate(folder.path);
+          if (!isRoot) setOpen(true);
+        }}
+        className={classNames(
+          'lib-tree-item w-full',
+          isActive && 'lib-tree-item-active'
+        )}
+        style={{ paddingLeft: `${10 + depth * 12}px` }}
+      >
+        {!isRoot && (
+          <span
+            role="presentation"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen((o) => !o);
+            }}
+            className="lib-tree-chevron"
+          >
+            <ChevronRight
+              className={classNames(
+                'w-3 h-3 transition-transform',
+                open && 'rotate-90'
+              )}
+              strokeWidth={2}
+            />
+          </span>
+        )}
+        {isRoot ? (
+          <Home className="w-3.5 h-3.5 shrink-0" strokeWidth={1.6} />
+        ) : open ? (
+          <FolderOpen className="w-3.5 h-3.5 shrink-0 text-un-blue" strokeWidth={1.6} />
+        ) : (
+          <Folder className="w-3.5 h-3.5 shrink-0" strokeWidth={1.6} />
+        )}
+        <span className="truncate flex-1 text-left">
+          {isRoot ? 'All files' : folder.name}
+        </span>
+        <span className="text-[10px] text-gray-400 tabular-nums shrink-0">
+          {countFilesRecursive(folder)}
+        </span>
+      </button>
+      {(isRoot || open) &&
+        folder.folders.map((child) => (
+          <FolderTreeNav
+            key={child.path}
+            folder={child}
+            currentPath={currentPath}
+            depth={depth + 1}
+            onNavigate={onNavigate}
+          />
+        ))}
+    </div>
+  );
+}
+
+function BreadcrumbBar({
+  crumbs,
+  onNavigate,
+}: {
+  crumbs: { name: string; path: string }[];
+  onNavigate: (path: string) => void;
+}) {
+  return (
+    <nav
+      className="mt-5 flex flex-wrap items-center gap-1 text-[12px] text-gray-500"
+      aria-label="Breadcrumb"
+    >
+      <button
+        type="button"
+        onClick={() => onNavigate('')}
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm hover:bg-gray-100 hover:text-ink transition-colors"
+      >
+        <Home className="w-3 h-3" strokeWidth={1.75} />
+        Library
+      </button>
+      {crumbs.map((c) => (
+        <span key={c.path} className="inline-flex items-center gap-1 min-w-0">
+          <ChevronRight className="w-3 h-3 text-gray-300 shrink-0" strokeWidth={2} />
+          <button
+            type="button"
+            onClick={() => onNavigate(c.path)}
+            className="px-1.5 py-0.5 rounded-sm hover:bg-gray-100 hover:text-ink transition-colors truncate max-w-[10rem]"
+          >
+            {c.name}
+          </button>
+        </span>
+      ))}
+    </nav>
+  );
+}
+
+function SearchResults({
+  query,
+  hits,
+  onGoTo,
+  onOpen,
+}: {
+  query: string;
+  hits: LibrarySearchHit[];
+  onGoTo: (hit: LibrarySearchHit) => void;
+  onOpen: (doc: UploadedDoc) => void;
+}) {
+  return (
+    <div className="mt-6">
+      <div className="flex items-baseline justify-between gap-3 mb-3">
+        <h2 className="text-[15px] font-semibold text-ink tracking-tight">
+          Where to find &ldquo;{query}&rdquo;
+        </h2>
+        <span className="text-[12px] text-gray-500">
+          {hits.length === 0
+            ? 'No matches'
+            : `${hits.length} location${hits.length === 1 ? '' : 's'}`}
+        </span>
+      </div>
+
+      {hits.length === 0 ? (
+        <div className="text-center text-[13px] text-gray-500 py-14 border border-dashed border-rule rounded-sm">
+          Nothing matched &ldquo;{query}&rdquo; in filenames, folder paths, or document text.
+        </div>
+      ) : (
+        <ul className="lib-search-results list-panel">
+          {hits.map((hit) => {
+            const kind = docKind(hit.doc.filename);
+            return (
+              <li key={hit.doc.id} className="lib-search-hit">
+                <button
+                  type="button"
+                  onClick={() => onOpen(hit.doc)}
+                  className="lib-search-hit-main"
+                >
+                  <div className="lib-search-hit-icon">
+                    <KindIcon kind={kind} />
+                  </div>
+                  <div className="min-w-0 flex-1 text-left">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[13px] font-semibold text-ink truncate">
+                        {docDisplayName(hit.doc)}
+                      </span>
+                      <span className={`chip ${kindChip(kind)} text-[9px] py-0.5 px-1.5`}>
+                        {matchKindLabel(hit.kind)}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex items-start gap-1.5 text-[12px] text-gray-500">
+                      <MapPin className="w-3 h-3 mt-0.5 shrink-0 text-un-blue" strokeWidth={2} />
+                      <span className="leading-snug">
+                        You can find it at{' '}
+                        <span className="text-ink font-medium">{hit.breadcrumb}</span>
+                      </span>
+                    </div>
+                    {hit.snippet && (
+                      <p className="mt-1.5 text-[12px] text-gray-500 leading-relaxed line-clamp-2">
+                        {hit.snippet}
+                      </p>
+                    )}
+                  </div>
+                </button>
+                <div className="lib-search-hit-actions">
+                  <Link
+                    to={libraryFolderHref(hit.folderPath)}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      onGoTo(hit);
+                    }}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    <FolderOpen className="w-3.5 h-3.5" />
+                    Open folder
+                  </Link>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function FileRow({
+  doc,
+  active,
+  highlighted,
+  onOpen,
+  onRemove,
+  rowRef,
+}: {
+  doc: UploadedDoc;
+  active: boolean;
+  highlighted: boolean;
+  onOpen: () => void;
+  onRemove: () => void;
+  rowRef: (el: HTMLElement | null) => void;
+}) {
+  const kind = docKind(doc.filename);
+  const name = docDisplayName(doc);
+
+  return (
+    <div
+      ref={rowRef}
+      className={classNames(
+        'lib-browser-row lib-browser-file group',
+        active && 'lib-browser-row-active',
+        highlighted && 'lib-file-highlight'
+      )}
+    >
+      <button type="button" onClick={onOpen} className="lib-browser-file-main">
+        <span className="text-gray-500 shrink-0">
+          <KindIcon kind={kind} />
+        </span>
+        <span className="flex-1 min-w-0 text-left">
+          <span className="block truncate text-[13px] font-medium text-ink" title={name}>
+            {name}
+          </span>
+          <span className="block text-[11px] text-gray-500 mt-0.5 truncate" title={docBreadcrumbPath(doc)}>
+            {docBreadcrumbPath(doc)}
+            {' · '}
+            {formatBytes(doc.bytes)}
+            {doc.pageCount ? ` · ${doc.pageCount} page${doc.pageCount === 1 ? '' : 's'}` : ''}
+          </span>
+        </span>
+        <span className={`chip ${kindChip(kind)} text-[9px] py-0.5 px-1.5 shrink-0`}>
+          {kindLabel(kind)}
+        </span>
+      </button>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Remove ${name}`}
+        title="Remove"
+        className="p-1.5 rounded-sm text-gray-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-accent-red hover:bg-red-50 transition-opacity shrink-0"
+      >
+        <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+      </button>
+    </div>
+  );
+}
+
 function EmptyLibrary({
-  onPick,
+  onPickFiles,
+  onPickFolder,
   onDragOver,
   onDrop,
 }: {
-  onPick: () => void;
+  onPickFiles: () => void;
+  onPickFolder: () => void;
   onDragOver: (e: React.DragEvent<HTMLElement>) => void;
   onDrop: (e: React.DragEvent<HTMLElement>) => void;
 }) {
   return (
-    <div
-      className="fade-in"
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-    >
+    <div className="fade-in" onDragOver={onDragOver} onDrop={onDrop}>
       <EmptyState
         icon={Library}
         title="Build your knowledge base"
-        description="Upload institutional reports, briefs, project files, and notes. Nexus will search them in chat and cite every source."
+        description="Upload an entire folder system — reports, briefs, spreadsheets — and keep the structure. Search or ask Nexus where something lives; you'll get a link to the exact folder with the file highlighted."
         action={
-          <button type="button" onClick={onPick} className="btn btn-primary">
-            <Upload className="w-4 h-4" />
-            Upload your first files
-          </button>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <button type="button" onClick={onPickFolder} className="btn btn-primary">
+              <FolderPlus className="w-4 h-4" />
+              Upload a folder
+            </button>
+            <button type="button" onClick={onPickFiles} className="btn btn-secondary">
+              <Upload className="w-4 h-4" />
+              Upload files
+            </button>
+          </div>
         }
       >
         <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-lg text-left">
           {[
-            { label: 'PDF & Word', hint: 'Reports and briefs' },
-            { label: 'Spreadsheets', hint: 'Matrices and lists' },
-            { label: 'Plain text', hint: '.txt and Markdown' },
+            { label: 'Keep your folders', hint: 'Paths stay intact' },
+            { label: 'Find by location', hint: '“Where are the numbers?”' },
+            { label: 'Jump & highlight', hint: 'Deep-link to the file' },
           ].map((item) => (
             <div
               key={item.label}
@@ -376,7 +926,7 @@ function EmptyLibrary({
           ))}
         </div>
         <p className="mt-6 text-[12px] text-gray-500">
-          Or drag files anywhere onto this page.
+          Or drag a folder anywhere onto this page.
         </p>
       </EmptyState>
     </div>
@@ -384,162 +934,62 @@ function EmptyLibrary({
 }
 
 function UploadStrip({
-  onPick,
+  onPickFiles,
+  onPickFolder,
   uploading,
+  progress,
+  destinationLabel,
   onDragOver,
   onDrop,
 }: {
-  onPick: () => void;
+  onPickFiles: () => void;
+  onPickFolder: () => void;
   uploading: boolean;
+  progress: string | null;
+  destinationLabel: string;
   onDragOver: (e: React.DragEvent<HTMLElement>) => void;
   onDrop: (e: React.DragEvent<HTMLElement>) => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onPick}
-      disabled={uploading}
+    <div
       onDragOver={onDragOver}
       onDrop={onDrop}
-      className="w-full group flex items-center gap-4 rounded-sm border border-dashed border-rule-strong bg-surface-subtle hover:border-un-blue hover:bg-un-blue-bg/35 transition-colors px-4 py-3.5 text-left disabled:opacity-60"
+      className="w-full flex flex-col sm:flex-row sm:items-center gap-3 rounded-sm border border-dashed border-rule-strong bg-surface-subtle px-4 py-3.5"
     >
-      <div className="w-10 h-10 rounded-sm bg-un-blue-bg text-un-blue flex items-center justify-center shrink-0 border border-un-blue-soft group-hover:bg-un-blue group-hover:text-white group-hover:border-un-blue transition-colors">
-        <Upload className="w-[18px] h-[18px]" strokeWidth={1.6} />
+      <div className="w-10 h-10 rounded-sm bg-un-blue-bg text-un-blue flex items-center justify-center shrink-0 border border-un-blue-soft">
+        <FolderPlus className="w-[18px] h-[18px]" strokeWidth={1.6} />
       </div>
       <div className="min-w-0 flex-1">
         <div className="text-[13px] font-semibold text-ink">
-          {uploading ? 'Adding documents…' : 'Drop files here or browse'}
+          {uploading
+            ? progress
+              ? `Adding… ${progress}`
+              : 'Adding documents…'
+            : 'Drop a folder or files here'}
         </div>
         <div className="text-[12px] text-gray-500 mt-0.5">
-          PDF, Word, Excel, .txt, .md · up to 25 MB each
+          Single files go into <span className="text-ink font-medium">{destinationLabel}</span>
+          {' · '}
+          folder drops keep their full path
         </div>
       </div>
-      <span className="hidden sm:inline-flex text-[12px] font-semibold text-un-blue group-hover:text-un-blue-dark shrink-0">
-        Browse
-      </span>
-    </button>
-  );
-}
-
-function DocCard({
-  doc,
-  active,
-  onOpen,
-  onRemove,
-  style,
-}: {
-  doc: UploadedDoc;
-  active: boolean;
-  onOpen: () => void;
-  onRemove: () => void;
-  style?: React.CSSProperties;
-}) {
-  const kind = docKind(doc.filename);
-
-  return (
-    <li
-      className={classNames(
-        'group relative stagger-in card overflow-hidden flex flex-col',
-        active ? 'border-un-blue shadow-card ring-1 ring-un-blue/20' : 'hover:border-un-blue-soft'
-      )}
-      style={style}
-    >
-      <button
-        type="button"
-        onClick={onOpen}
-        className="text-left flex flex-col flex-1 min-h-0"
-        aria-label={`Open ${doc.filename}`}
-      >
-        <DocPreview doc={doc} kind={kind} />
-        <div className="px-3.5 py-3 border-t border-rule bg-surface">
-          <div className="flex items-start gap-2">
-            <h3
-              className="text-[13px] font-semibold text-ink leading-snug line-clamp-2 flex-1 min-w-0"
-              title={doc.filename}
-            >
-              {doc.filename}
-            </h3>
-            <span className={`chip ${kindChip(kind)} text-[9px] py-0.5 px-1.5 shrink-0`}>
-              {kindLabel(kind)}
-            </span>
-          </div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-gray-500">
-            <span>{formatBytes(doc.bytes)}</span>
-            {doc.pageCount ? (
-              <>
-                <span aria-hidden="true">·</span>
-                <span>
-                  {doc.pageCount} page{doc.pageCount === 1 ? '' : 's'}
-                </span>
-              </>
-            ) : null}
-            <span aria-hidden="true">·</span>
-            <span>{formatRelative(doc.uploadedAt)}</span>
-          </div>
-        </div>
-      </button>
-
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onRemove();
-        }}
-        aria-label={`Remove ${doc.filename}`}
-        title="Remove"
-        className="absolute right-2 top-2 z-10 p-1.5 rounded-sm bg-surface/90 border border-rule text-gray-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-accent-red hover:border-accent-red/30 shadow-card transition-opacity"
-      >
-        <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
-      </button>
-    </li>
-  );
-}
-
-function DocPreview({ doc, kind }: { doc: UploadedDoc; kind: DocKind }) {
-  if (doc.previewUrl) {
-    return (
-      <div className="lib-preview-frame">
-        <img
-          src={doc.previewUrl}
-          alt=""
-          className="lib-preview-img"
-          draggable={false}
-        />
-      </div>
-    );
-  }
-
-  const lines = doc.text
-    .replace(/^-- page \d+ --\s*/gm, '')
-    .split(/\n+/)
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .slice(0, 12);
-
-  return (
-    <div className="lib-preview-frame lib-preview-paper">
-      <div className="lib-preview-paper-inner">
-        <div className="lib-preview-paper-badge">
-          <KindIcon kind={kind} />
-          <span>{kindLabel(kind)}</span>
-        </div>
-        <div className="lib-preview-paper-body" aria-hidden="true">
-          {lines.length > 0 ? (
-            lines.map((line, i) => (
-              <p
-                key={i}
-                className={classNames(
-                  'lib-preview-line',
-                  i === 0 && 'lib-preview-line-title'
-                )}
-              >
-                {line}
-              </p>
-            ))
-          ) : (
-            <p className="lib-preview-line text-gray-400">Document preview</p>
-          )}
-        </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <button
+          type="button"
+          onClick={onPickFolder}
+          disabled={uploading}
+          className="btn btn-secondary btn-sm"
+        >
+          Folder
+        </button>
+        <button
+          type="button"
+          onClick={onPickFiles}
+          disabled={uploading}
+          className="btn btn-primary btn-sm"
+        >
+          Files
+        </button>
       </div>
     </div>
   );

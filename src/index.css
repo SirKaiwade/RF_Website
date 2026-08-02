@@ -636,6 +636,141 @@
     -webkit-box-orient: vertical;
   }
 
+  /* Library folder browser */
+  .lib-tree-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 6px 8px 6px 10px;
+    border-radius: 2px;
+    font-size: 12px;
+    color: rgb(var(--ink-muted));
+    text-align: left;
+    transition: background-color 120ms ease, color 120ms ease;
+  }
+
+  .lib-tree-item:hover {
+    background: rgb(var(--gray-100));
+    color: rgb(var(--ink));
+  }
+
+  .lib-tree-item-active {
+    background: rgb(var(--un-blue-bg));
+    color: var(--un-blue-text);
+    font-weight: 600;
+  }
+
+  .lib-tree-chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    margin-left: -2px;
+    color: rgb(var(--gray-400));
+    border-radius: 2px;
+  }
+
+  .lib-tree-chevron:hover {
+    background: rgb(var(--gray-200));
+    color: rgb(var(--ink));
+  }
+
+  .lib-browser-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 48px;
+    padding: 8px 12px;
+    font-size: 13px;
+    text-align: left;
+    transition: background-color 120ms ease;
+  }
+
+  .lib-browser-row:hover {
+    background: rgb(var(--surface-muted));
+  }
+
+  .lib-browser-row-active {
+    background: rgb(var(--un-blue-bg));
+  }
+
+  .lib-browser-folder {
+    color: rgb(var(--ink));
+  }
+
+  .lib-browser-file-main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+  }
+
+  .lib-file-highlight {
+    animation: lib-file-flash 2.8s ease-out;
+    box-shadow: inset 3px 0 0 var(--un-blue);
+    background: rgb(var(--un-blue-bg));
+  }
+
+  @keyframes lib-file-flash {
+    0% {
+      background: rgb(var(--un-blue-soft) / 0.55);
+    }
+    40% {
+      background: rgb(var(--un-blue-bg));
+    }
+    100% {
+      background: transparent;
+    }
+  }
+
+  .lib-search-hit {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 14px;
+  }
+
+  @media (min-width: 640px) {
+    .lib-search-hit {
+      flex-direction: row;
+      align-items: center;
+    }
+  }
+
+  .lib-search-hit-main {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+  }
+
+  .lib-search-hit-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 2px;
+    background: rgb(var(--surface-muted));
+    border: 1px solid rgb(var(--rule));
+    color: rgb(var(--ink-muted));
+    flex-shrink: 0;
+  }
+
+  .lib-search-hit-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+
   /* Institutional data register */
   .data-register {
     border: 1px solid rgb(var(--rule));

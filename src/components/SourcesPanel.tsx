@@ -47,7 +47,7 @@ function docLabel(documentId: string): { title: string; subtitle: string } | nul
   }
   const uploaded = getUploadedDocs().find((d) => d.id === documentId);
   if (uploaded) {
-    return { title: uploaded.filename, subtitle: 'Session upload' };
+    return { title: uploaded.filename, subtitle: 'Library upload' };
   }
   return null;
 }

@@ -7,8 +7,9 @@ import BrandMark from './BrandMark';
 import { useConversations } from '../lib/conversations';
 import { initLocalDataSync } from '../lib/localDataSync';
 import { loadSharedLibrary } from '../lib/db/library';
-import { hydrateSharedDocs } from '../lib/uploads';
+import { hydrateSharedDocs, syncUnsharedDocsToCloud } from '../lib/uploads';
 import { supabaseConfigured } from '../lib/supabase';
+import { useAuth } from '../lib/auth';
 import type { Conversation } from '../types/chat';
 
 export interface ShellContext {
@@ -27,6 +28,7 @@ export interface ShellContext {
 
 export default function AppShell() {
   const conv = useConversations();
+  const { user } = useAuth();
   const [openDocId, setOpenDocId] = useState<string | null>(null);
   const [highlight, setHighlight] = useState<string | null>(null);
   // Bumped on every open call so the viewer re-scrolls even when the user
@@ -53,7 +55,7 @@ export default function AppShell() {
     });
   }
 
-  // Sync shared records (events / pubs / directory) and hydrate the cloud library.
+  // Sync shared records + hydrate durable library (localStorage already loaded in uploads.ts).
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -67,11 +69,14 @@ export default function AppShell() {
       if (!cancelled && sharedDocs) {
         hydrateSharedDocs(sharedDocs);
       }
+      if (!cancelled && user?.email && supabaseConfigured()) {
+        await syncUnsharedDocsToCloud(user.email);
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [user?.email]);
 
   const openDocument = useCallback((id: string, highlightText?: string) => {
     setOpenDocId(id);

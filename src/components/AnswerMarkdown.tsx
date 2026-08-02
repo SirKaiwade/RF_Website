@@ -1,5 +1,6 @@
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Link } from 'react-router-dom';
 import { getDocument } from '../data/documents';
 import { getUploadedDocs } from '../lib/uploads';
 
@@ -29,6 +30,26 @@ function docTitle(documentId: string): string {
   return uploaded?.filename ?? 'Source';
 }
 
+function isLibraryDeepLink(href: string | undefined): boolean {
+  if (!href) return false;
+  try {
+    if (href.startsWith('/library')) return true;
+    const url = new URL(href, window.location.origin);
+    return url.origin === window.location.origin && url.pathname === '/library';
+  } catch {
+    return false;
+  }
+}
+
+function libraryLinkTo(href: string): string {
+  try {
+    const url = new URL(href, window.location.origin);
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return href;
+  }
+}
+
 export default function AnswerMarkdown({ content, sources, onCitationClick }: Props) {
   const components: Components = {
     a: ({ href, children }) => {
@@ -46,6 +67,16 @@ export default function AnswerMarkdown({ content, sources, onCitationClick }: Pr
           >
             {n}
           </button>
+        );
+      }
+      if (isLibraryDeepLink(href) && href) {
+        return (
+          <Link
+            to={libraryLinkTo(href)}
+            className="text-un-blue font-medium underline underline-offset-2 decoration-un-blue/40 hover:decoration-un-blue"
+          >
+            {children}
+          </Link>
         );
       }
       const external = href?.startsWith('http');

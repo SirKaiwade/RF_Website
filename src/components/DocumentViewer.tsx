@@ -20,7 +20,8 @@ import { getPublication } from '../data/publications';
 import { eventDateLabel, eventToText, publicationToText } from '../lib/corpusText';
 import { FreshnessLabel, Avatar } from './ui';
 import { formatBytes, formatDate, formatRelative } from '../lib/format';
-import { useUploadedDocs } from '../lib/uploads';
+import { useUploadedDocs, type UploadedDoc } from '../lib/uploads';
+import { docBreadcrumbPath } from '../lib/libraryTree';
 import { findHighlight, type HighlightMatchKind } from '../lib/highlight';
 import { classNames } from '../lib/format';
 
@@ -284,7 +285,7 @@ function UploadedView({
   highlightToken,
   onClose,
 }: {
-  doc: { filename: string; bytes: number; uploadedAt: string; pageCount?: number; charCount: number; text: string };
+  doc: UploadedDoc;
   highlight: string | null;
   highlightToken: number;
   onClose: () => void;
@@ -293,6 +294,7 @@ function UploadedView({
     () => (highlight ? findHighlight(doc.text, highlight) : null),
     [doc.text, highlight]
   );
+  const breadcrumb = docBreadcrumbPath(doc);
 
   const markRef = useRef<HTMLElement | null>(null);
 
@@ -313,8 +315,8 @@ function UploadedView({
           <Paperclip className="w-3.5 h-3.5" strokeWidth={1.75} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="text-overline uppercase font-semibold text-gray-500 truncate">
-            Uploaded · session-only
+          <div className="text-overline uppercase font-semibold text-gray-500 truncate" title={breadcrumb}>
+            {breadcrumb}
           </div>
           <div className="text-[13px] font-semibold text-ink truncate" title={doc.filename}>
             {doc.filename}
@@ -333,13 +335,15 @@ function UploadedView({
       <div className="overflow-y-auto flex-1">
         <div className="px-6 py-6">
           <div className="flex flex-wrap items-center gap-1.5 mb-3">
-            <span className="chip chip-amber">Session-only</span>
+            <span className="chip chip-green">Saved</span>
             <span className="chip chip-gray">Uploaded</span>
           </div>
           <h1 className="font-display font-bold text-display-m leading-tight mb-2 break-words">
             {doc.filename}
           </h1>
           <div className="text-[12px] text-gray-500 mb-5">
+            <span className="text-ink font-medium">{breadcrumb}</span>
+            {' · '}
             {formatBytes(doc.bytes)}
             {doc.pageCount ? ` · ${doc.pageCount} pages` : ''} · added{' '}
             {formatRelative(doc.uploadedAt)}

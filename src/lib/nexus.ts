@@ -104,21 +104,38 @@ function buildSystemPrompt(uploadedDocs: UploadedDoc[]): string {
     .join('\n\n');
 
   const uploadedBlocks = uploadedDocs
-    .map(
-      (u) => `<doc id="${u.id}" source="user-upload">
+    .map((u) => {
+      const path = (u.localRelativePath || u.filename).replace(/\\/g, '/');
+      const parts = path.split('/').filter(Boolean);
+      const folder = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+      const breadcrumb =
+        parts.length <= 1
+          ? `Library > ${parts[0] || u.filename}`
+          : parts.join(' > ');
+      const libraryHref = folder
+        ? `/library?path=${encodeURIComponent(folder)}&file=${encodeURIComponent(u.id)}`
+        : `/library?file=${encodeURIComponent(u.id)}`;
+      return `<doc id="${u.id}" source="user-upload">
   <title>${u.filename}</title>
+  <path>${path}</path>
+  <breadcrumb>${breadcrumb}</breadcrumb>${
+        folder ? `\n  <folder>${folder}</folder>` : ''
+      }
+  <library_link>${libraryHref}</library_link>
   <type>Uploaded document</type>
   <uploaded_at>${u.uploadedAt}</uploaded_at>${
         u.pageCount ? `\n  <pages>${u.pageCount}</pages>` : ''
       }
   <full_text>${u.text}</full_text>
-</doc>`
-    )
+</doc>`;
+    })
     .join('\n\n');
 
   const uploadedSection = uploadedDocs.length
     ? `\n\n<user_uploaded_documents>
-The user has uploaded the following document(s) into this session. Treat them as first-class corpus members. They take precedence when the question is clearly about them. Cite them by their id (which starts with "up-") just like any seed doc.
+The user has uploaded the following document(s) to the knowledge library. Treat them as first-class corpus members. They take precedence when the question is clearly about them. Cite them by their id (which starts with "up-") just like any seed doc.
+
+Each document has a <breadcrumb> pin-point location using " > " separators (e.g. "Finance > 2024 > Q1 > budget.xlsx"), a slash <path>, and a <library_link> deep link. When the user asks where something lives, which folder holds a number, or how to find a file, answer with the exact <breadcrumb> and include a markdown link using the exact library_link value, e.g. You can find it at **Finance > 2024 > Q1 > [budget.xlsx](/library?path=Finance/2024/Q1&file=up-abc).** Still cite sources with [n] and verbatim excerpts as usual.
 
 ${uploadedBlocks}
 </user_uploaded_documents>`
@@ -136,7 +153,7 @@ ${uploadedBlocks}
 
 Today's date is ${today}. Use it to reason about which events are upcoming versus past.
 
-Your job: answer questions about UNU Global Health's work using ONLY the corpus below. The corpus contains documents (reports, briefs, meeting notes, datasets, etc.), the people behind them, the 2026 events matrix (every convening UNU Global Health runs or contributes to: conferences, webinars, workshops, policy dialogues, consultations, partnership meetings, and side events), and the 2026 publications database (journal articles, policy briefs, reports, book chapters, and web articles). Events (ids starting "ev-") and publications (ids starting "pub-") are first-class, citable corpus entries — cite them like documents, quoting verbatim from their entry text. The user may also have uploaded session-only documents — those are equally citable.
+Your job: answer questions about UNU Global Health's work using ONLY the corpus below. The corpus contains documents (reports, briefs, meeting notes, datasets, etc.), the people behind them, the 2026 events matrix (every convening UNU Global Health runs or contributes to: conferences, webinars, workshops, policy dialogues, consultations, partnership meetings, and side events), and the 2026 publications database (journal articles, policy briefs, reports, book chapters, and web articles). Events (ids starting "ev-") and publications (ids starting "pub-") are first-class, citable corpus entries — cite them like documents, quoting verbatim from their entry text. Uploaded library documents are equally citable and persist across sessions.
 
 Rules:
 - Ground every claim in the corpus. Never invent facts, dates, names, or findings.
@@ -144,10 +161,11 @@ Rules:
 - Cite every claim inline using [1], [2], [3] markers. The number maps to the position in the sources array (1-indexed).
 - For EVERY source you cite, the "excerpt" field MUST be a verbatim, contiguous quote copied character-for-character from that document's text — no paraphrasing, no ellipses inside the quote, no summarising. Pick the single sentence or sentence fragment that most directly supports the claim. 1–3 sentences max. The UI will use this exact string to highlight the passage in the source — if the quote is paraphrased it will fail to highlight and the user will see a warning.
 - If you cannot find a verbatim sentence that supports a claim, do not cite it; either drop the claim or set noAnswer=true.
+- Location questions ("where do I find…", "which folder has…", "where are the numbers for…"): lead with the document's <breadcrumb> in "Folder > Subfolder > file" form and a markdown hyperlink using that document's <library_link>. Example: "You can find it at **Finance > 2024 > Q1 > [budget.xlsx](/library?path=Finance/2024/Q1&file=up-abc).**" Still include a normal [n] citation with a verbatim excerpt from the file.
 - Use **bold** sparingly for key entities, project names, and findings.
 - Order sources by importance to the answer.
 - For roll-up questions across the events matrix or publications database (counts, upcoming events, who leads what, reach numbers), synthesise across entries and cite the most relevant individual entries — at most 6 sources. State plainly when many entries have missing fields (e.g. participant counts not yet reported).
-- Pick relatedPeopleIds from document owners, related_people fields, or expertise matches. Max 4. Skip this for questions that are purely about uploaded session documents.
+- Pick relatedPeopleIds from document owners, related_people fields, or expertise matches. Max 4. Skip this for questions that are purely about uploaded library documents.
 - Generate 3 concrete follow-up questions a user would realistically ask next, grounded in the corpus or uploads.
 - Confidence: report only when honest. 0.85+ when directly supported by 2+ sources; 0.65-0.84 when synthesised across sources; below 0.65 when partial. Prefer omitting confidence over fabricating one.
 - Tone: factual, concise, like a senior colleague briefing you. No marketing voice, no hedging filler.

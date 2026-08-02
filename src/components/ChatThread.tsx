@@ -19,12 +19,13 @@ import { publicationsStore } from '../data/publications';
 import { getPerson } from '../data/people';
 import { useAuth } from '../lib/auth';
 import {
-  ingestFile,
+  ingestFiles,
   persistDocToCloud,
   removeUploadedDoc,
   useUploadedDocs,
   type UploadedDoc,
 } from '../lib/uploads';
+import { filesFromDataTransfer } from '../lib/folderDrop';
 import { supabaseConfigured } from '../lib/supabase';
 import Composer from './Composer';
 import AnswerMarkdown from './AnswerMarkdown';
@@ -74,16 +75,11 @@ export default function ChatThread({
   async function ingestMany(files: File[]) {
     if (files.length === 0) return;
     setDropError(null);
-    const errors: string[] = [];
+    const { docs, errors } = await ingestFiles(files, { skipUnsupported: true });
     const cloud = supabaseConfigured();
-    for (const f of files) {
-      const r = await ingestFile(f);
-      if (!r.ok && r.error) {
-        errors.push(r.error);
-        continue;
-      }
-      if (r.doc && cloud && user?.email) {
-        const saved = await persistDocToCloud(r.doc, user.email);
+    if (cloud && user?.email) {
+      for (const doc of docs) {
+        const saved = await persistDocToCloud(doc, user.email);
         if (!saved.ok && saved.error) errors.push(saved.error);
       }
     }
@@ -94,7 +90,7 @@ export default function ChatThread({
     e.preventDefault();
     e.stopPropagation();
     resetDrag();
-    await ingestMany(Array.from(e.dataTransfer.files ?? []));
+    await ingestMany(await filesFromDataTransfer(e.dataTransfer));
   }
 
   return (

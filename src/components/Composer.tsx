@@ -105,7 +105,7 @@ export default function Composer({ onSend, placeholder, autoFocus = true }: Prop
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
             aria-label="Attach a document"
-            title="Attach a file (this session only)"
+            title="Attach a file to the knowledge library"
             className="w-9 h-9 rounded-full text-gray-400 hover:text-un-blue hover:bg-un-blue-bg flex items-center justify-center disabled:opacity-50 transition-colors"
           >
             {uploading ? (

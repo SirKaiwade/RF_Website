@@ -22,15 +22,64 @@ export interface UploadedDoc {
   shared?: boolean;
 }
 
-// Soft caps. Per-doc, we trim to ~80k chars (~20k tokens). Total session cap is ~250k chars
+// Soft caps. Per-doc, we trim to ~80k chars (~20k tokens). Total library cap is ~250k chars
 // so the corpus prompt stays well under the model's context window even with seed docs.
 const MAX_PER_DOC_CHARS = 80_000;
 export const MAX_TOTAL_UPLOADED_CHARS = 250_000;
 
-let store: UploadedDoc[] = [];
+const STORAGE_KEY = 'nexus:library-docs';
+
+let store: UploadedDoc[] = loadFromLocalStorage();
 const listeners = new Set<() => void>();
 
+function loadFromLocalStorage(): UploadedDoc[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (d): d is UploadedDoc =>
+          !!d &&
+          typeof d === 'object' &&
+          typeof (d as UploadedDoc).id === 'string' &&
+          typeof (d as UploadedDoc).filename === 'string' &&
+          typeof (d as UploadedDoc).text === 'string'
+      )
+      .map((d) => ({
+        ...d,
+        bytes: typeof d.bytes === 'number' ? d.bytes : d.text.length,
+        charCount: typeof d.charCount === 'number' ? d.charCount : d.text.length,
+        uploadedAt: d.uploadedAt || new Date().toISOString(),
+        // Every file needs a pin-pointable path (at least the filename).
+        localRelativePath:
+          typeof d.localRelativePath === 'string' && d.localRelativePath.trim()
+            ? d.localRelativePath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+            : d.filename,
+        // Previews are large data URLs — not restored from disk.
+        previewUrl: undefined,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/** Persist text + metadata. Skip previewUrl to stay under localStorage quotas. */
+function persistToLocalStorage(): void {
+  try {
+    const slim = store.map(({ previewUrl: _preview, ...rest }) => rest);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(slim));
+  } catch (err) {
+    console.warn(
+      '[Nexus] Could not persist library to localStorage:',
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
 function notify() {
+  persistToLocalStorage();
   listeners.forEach((l) => l());
 }
 
@@ -58,11 +107,19 @@ export function totalUploadedChars(): number {
 export function removeUploadedDoc(id: string): void {
   store = store.filter((d) => d.id !== id);
   notify();
+  void import('./db/library').then(({ removeDocumentFromLibrary }) =>
+    removeDocumentFromLibrary(id)
+  );
 }
 
 export function removeUploadedDocByLocalKey(localFileKey: string): void {
+  const removed = store.filter((d) => d.localFileKey === localFileKey);
   store = store.filter((d) => d.localFileKey !== localFileKey);
   notify();
+  if (removed.length === 0) return;
+  void import('./db/library').then(({ removeDocumentFromLibrary }) => {
+    for (const d of removed) void removeDocumentFromLibrary(d.id);
+  });
 }
 
 export function getLocalSyncedDocs(): UploadedDoc[] {
@@ -70,16 +127,48 @@ export function getLocalSyncedDocs(): UploadedDoc[] {
 }
 
 export function clearUploadedDocs(): void {
+  const ids = store.map((d) => d.id);
   store = [];
   notify();
+  void import('./db/library').then(({ removeDocumentFromLibrary }) => {
+    for (const id of ids) void removeDocumentFromLibrary(id);
+  });
 }
 
-/** Merge documents loaded from the shared Supabase library into the session store. */
+/** Merge documents loaded from the shared Supabase library into the durable store. */
 export function hydrateSharedDocs(docs: UploadedDoc[]): void {
-  const existingIds = new Set(store.map((d) => d.id));
-  const incoming = docs.filter((d) => !existingIds.has(d.id)).map((d) => ({ ...d, shared: true }));
-  if (incoming.length === 0) return;
-  store = [...incoming, ...store];
+  if (docs.length === 0) return;
+  const byId = new Map(store.map((d) => [d.id, d]));
+  for (const incoming of docs) {
+    const existing = byId.get(incoming.id);
+    if (!existing) {
+      byId.set(incoming.id, {
+        ...incoming,
+        shared: true,
+        localRelativePath: incoming.localRelativePath || incoming.filename,
+      });
+      continue;
+    }
+    // Prefer the longer text body; always mark cloud-backed docs as shared.
+    const text =
+      (incoming.text?.length ?? 0) > (existing.text?.length ?? 0)
+        ? incoming.text
+        : existing.text;
+    byId.set(incoming.id, {
+      ...existing,
+      ...incoming,
+      text,
+      charCount: text.length,
+      shared: true,
+      localRelativePath:
+        incoming.localRelativePath ||
+        existing.localRelativePath ||
+        incoming.filename ||
+        existing.filename,
+      previewUrl: existing.previewUrl ?? incoming.previewUrl,
+    });
+  }
+  store = [...byId.values()].sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt));
   notify();
 }
 
@@ -87,6 +176,17 @@ export function hydrateSharedDocs(docs: UploadedDoc[]): void {
 export function markDocShared(id: string): void {
   store = store.map((d) => (d.id === id ? { ...d, shared: true } : d));
   notify();
+}
+
+/** Push any docs that are only local up to Supabase (e.g. after refresh / offline upload). */
+export async function syncUnsharedDocsToCloud(
+  uploaderEmail: string
+): Promise<void> {
+  const pending = store.filter((d) => !d.shared);
+  if (pending.length === 0) return;
+  for (const doc of pending) {
+    await persistDocToCloud(doc, uploaderEmail);
+  }
 }
 
 function uid(): string {
@@ -177,7 +277,32 @@ export interface IngestMeta {
   localRelativePath?: string;
 }
 
-export async function ingestFile(file: File, meta?: IngestMeta): Promise<UploadResult> {
+/** Prefer explicit meta, then browser folder-upload path (webkitRelativePath).
+ *  Always returns a path — at minimum the filename — so every file is pin-pointable.
+ */
+function resolveRelativePath(
+  file: File,
+  meta?: IngestMeta,
+  destinationFolder?: string
+): string {
+  if (meta?.localRelativePath) {
+    return meta.localRelativePath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  }
+  const webkit = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+  if (webkit && webkit.includes('/')) {
+    return webkit.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  }
+  const dest = (destinationFolder ?? '')
+    .replace(/\\/g, '/')
+    .replace(/^\/+|\/+$/g, '');
+  return dest ? `${dest}/${file.name}` : file.name;
+}
+
+export async function ingestFile(
+  file: File,
+  meta?: IngestMeta,
+  destinationFolder?: string
+): Promise<UploadResult> {
   const name = file.name.toLowerCase();
   const isPdf = name.endsWith('.pdf') || file.type === 'application/pdf';
   const isDocx =
@@ -246,16 +371,26 @@ export async function ingestFile(file: File, meta?: IngestMeta): Promise<UploadR
     text = text.slice(0, MAX_PER_DOC_CHARS) + '\n\n[…truncated for context window]';
   }
 
-  const newTotal = totalUploadedChars() + text.length;
+  const localRelativePath = resolveRelativePath(file, meta, destinationFolder);
+
+  // Replace existing docs at the same path (folder re-upload) or local sync key.
+  let replacedChars = 0;
+  if (meta?.localFileKey) {
+    const prev = store.filter((d) => d.localFileKey === meta.localFileKey);
+    replacedChars += prev.reduce((s, d) => s + d.charCount, 0);
+    store = store.filter((d) => d.localFileKey !== meta.localFileKey);
+  } else if (localRelativePath) {
+    const prev = store.filter((d) => d.localRelativePath === localRelativePath);
+    replacedChars += prev.reduce((s, d) => s + d.charCount, 0);
+    store = store.filter((d) => d.localRelativePath !== localRelativePath);
+  }
+
+  const newTotal = totalUploadedChars() - replacedChars + text.length;
   if (newTotal > MAX_TOTAL_UPLOADED_CHARS) {
     return {
       ok: false,
-      error: `Adding ${file.name} would exceed the session corpus limit. Remove a previous upload first.`,
+      error: `Adding ${file.name} would exceed the library corpus limit (~${Math.round(MAX_TOTAL_UPLOADED_CHARS / 1000)}k chars). Remove a document first.`,
     };
-  }
-
-  if (meta?.localFileKey) {
-    store = store.filter((d) => d.localFileKey !== meta.localFileKey);
   }
 
   const doc: UploadedDoc = {
@@ -269,7 +404,7 @@ export async function ingestFile(file: File, meta?: IngestMeta): Promise<UploadR
     previewUrl,
     source: meta?.source ?? 'upload',
     localFileKey: meta?.localFileKey,
-    localRelativePath: meta?.localRelativePath,
+    localRelativePath,
   };
 
   store = [...store, doc];
@@ -278,8 +413,46 @@ export async function ingestFile(file: File, meta?: IngestMeta): Promise<UploadR
 }
 
 /**
+ * Ingest many files (e.g. a whole folder). Skips unsupported types quietly when
+ * `skipUnsupported` is true so folder uploads don't fail on .DS_Store etc.
+ * Single files without their own nested path land in `destinationFolder`.
+ */
+export async function ingestFiles(
+  files: File[],
+  options?: {
+    skipUnsupported?: boolean;
+    /** Current library folder — single files are placed here. */
+    destinationFolder?: string;
+    onProgress?: (done: number, total: number, filename: string) => void;
+  }
+): Promise<{ docs: UploadedDoc[]; errors: string[] }> {
+  const docs: UploadedDoc[] = [];
+  const errors: string[] = [];
+  const list = Array.from(files);
+  let done = 0;
+  for (const file of list) {
+    options?.onProgress?.(done, list.length, file.name);
+    const r = await ingestFile(file, undefined, options?.destinationFolder);
+    done += 1;
+    options?.onProgress?.(done, list.length, file.name);
+    if (r.ok && r.doc) {
+      docs.push(r.doc);
+      continue;
+    }
+    if (
+      options?.skipUnsupported &&
+      r.error?.startsWith('Unsupported file type:')
+    ) {
+      continue;
+    }
+    if (r.error) errors.push(r.error);
+  }
+  return { docs, errors };
+}
+
+/**
  * Persist an ingested doc to the shared Supabase library when cloud is configured.
- * No-op without Supabase. Prefer calling after every successful upload in production.
+ * Local browser storage is always updated via the store; this publishes for the whole team.
  */
 export async function persistDocToCloud(
   doc: UploadedDoc,

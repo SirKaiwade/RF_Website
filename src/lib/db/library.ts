@@ -47,7 +47,7 @@ export interface SaveToLibraryResult {
   error?: string;
 }
 
-/** Publishes a session-local upload so every staff member's corpus includes it. */
+/** Publishes a library upload so every staff member's corpus includes it. */
 export async function saveDocumentToLibrary(
   doc: UploadedDoc,
   uploaderEmail: string
