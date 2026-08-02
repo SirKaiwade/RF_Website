@@ -19,6 +19,7 @@ import {
   ingestFiles,
   persistDocToCloud,
   removeUploadedDoc,
+  removeUploadedDocsInFolder,
   useUploadedDocs,
   type UploadedDoc,
 } from '../lib/uploads';
@@ -108,6 +109,12 @@ export default function LibraryPage() {
   const [errors, setErrors] = useState<string[]>([]);
   const [highlightFileId, setHighlightFileId] = useState<string | null>(null);
   const [extraFolders, setExtraFolders] = useState<string[]>([]);
+  const [folderMenu, setFolderMenu] = useState<{
+    x: number;
+    y: number;
+    path: string;
+    name: string;
+  } | null>(null);
   const dragDepth = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -245,6 +252,78 @@ export default function LibraryPage() {
     if (nestedDrop?.localRelativePath && !currentPath) {
       const top = nestedDrop.localRelativePath.split('/')[0];
       if (top) navigateToFolder(top);
+    }
+  }
+
+  useEffect(() => {
+    if (!folderMenu) return;
+    function close() {
+      setFolderMenu(null);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') close();
+    }
+    window.addEventListener('click', close);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [folderMenu]);
+
+  function openFolderMenu(
+    e: React.MouseEvent,
+    path: string,
+    name: string
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    const norm = normalizeLibraryPath(path);
+    if (!norm) return;
+    setFolderMenu({
+      x: e.clientX,
+      y: e.clientY,
+      path: norm,
+      name,
+    });
+  }
+
+  function deleteFolder(folderPath: string) {
+    const norm = normalizeLibraryPath(folderPath);
+    if (!norm) return;
+    const folder = getFolderAtPath(tree, norm);
+    const fileCount = countFilesRecursive(folder);
+    const label = folderBreadcrumbPath(norm);
+    const ok = window.confirm(
+      fileCount > 0
+        ? `Delete “${label}” and ${fileCount} file${fileCount === 1 ? '' : 's'} inside it? This cannot be undone.`
+        : `Delete empty folder “${label}”?`
+    );
+    if (!ok) return;
+
+    if (ctx.openDocId) {
+      const open = uploadedDocs.find((d) => d.id === ctx.openDocId);
+      if (open) {
+        const path = docFullPath(open);
+        if (path === norm || path.startsWith(`${norm}/`)) {
+          ctx.closeDocument();
+        }
+      }
+    }
+
+    removeUploadedDocsInFolder(norm);
+    setExtraFolders((prev) =>
+      prev.filter((p) => p !== norm && !p.startsWith(`${norm}/`))
+    );
+    setFolderMenu(null);
+
+    if (currentPath === norm || currentPath.startsWith(`${norm}/`)) {
+      const parent = norm.includes('/')
+        ? norm.split('/').slice(0, -1).join('/')
+        : '';
+      navigateToFolder(parent);
     }
   }
 
@@ -423,6 +502,7 @@ export default function LibraryPage() {
                   currentPath={currentPath}
                   depth={0}
                   onNavigate={navigateToFolder}
+                  onFolderContextMenu={openFolderMenu}
                 />
               </nav>
             </aside>
@@ -537,7 +617,11 @@ export default function LibraryPage() {
                               key={folder.path}
                               type="button"
                               onClick={() => navigateToFolder(folder.path)}
+                              onContextMenu={(e) =>
+                                openFolderMenu(e, folder.path, folder.name)
+                              }
                               className="lib-browser-row lib-browser-folder"
+                              title="Right-click to delete folder"
                             >
                               <Folder
                                 className="w-4 h-4 text-un-blue shrink-0"
@@ -590,6 +674,29 @@ export default function LibraryPage() {
         )}
       </div>
 
+      {folderMenu && (
+        <div
+          className="lib-ctx-menu"
+          style={{ top: folderMenu.y, left: folderMenu.x }}
+          role="menu"
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => e.preventDefault()}
+        >
+          <div className="lib-ctx-menu-label" title={folderMenu.path}>
+            {folderMenu.name}
+          </div>
+          <button
+            type="button"
+            role="menuitem"
+            className="lib-ctx-menu-item lib-ctx-menu-danger"
+            onClick={() => deleteFolder(folderMenu.path)}
+          >
+            <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+            Delete folder
+          </button>
+        </div>
+      )}
+
       {dragging && (
         <div
           className="absolute inset-0 z-40 bg-un-blue-bg/96 border-2 border-dashed border-un-blue m-3 rounded-sm flex items-center justify-center fade-in"
@@ -621,11 +728,13 @@ function FolderTreeNav({
   currentPath,
   depth,
   onNavigate,
+  onFolderContextMenu,
 }: {
   folder: TreeFolder;
   currentPath: string;
   depth: number;
   onNavigate: (path: string) => void;
+  onFolderContextMenu: (e: React.MouseEvent, path: string, name: string) => void;
 }) {
   const isRoot = folder.path === '';
   const isActive = currentPath === folder.path;
@@ -646,11 +755,17 @@ function FolderTreeNav({
           onNavigate(folder.path);
           if (!isRoot) setOpen(true);
         }}
+        onContextMenu={
+          isRoot
+            ? undefined
+            : (e) => onFolderContextMenu(e, folder.path, folder.name)
+        }
         className={classNames(
           'lib-tree-item w-full',
           isActive && 'lib-tree-item-active'
         )}
         style={{ paddingLeft: `${10 + depth * 12}px` }}
+        title={isRoot ? undefined : 'Right-click to delete folder'}
       >
         {!isRoot && (
           <span
@@ -692,6 +807,7 @@ function FolderTreeNav({
             currentPath={currentPath}
             depth={depth + 1}
             onNavigate={onNavigate}
+            onFolderContextMenu={onFolderContextMenu}
           />
         ))}
     </div>

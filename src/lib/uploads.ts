@@ -166,6 +166,27 @@ export function removeUploadedDoc(id: string): void {
   );
 }
 
+/** Remove every document in a folder (and nested subfolders). */
+export function removeUploadedDocsInFolder(folderPath: string): number {
+  const norm = folderPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  if (!norm) return 0;
+  const prefix = `${norm}/`;
+  const removed = store.filter((d) => {
+    const path = (d.localRelativePath || d.filename).replace(/\\/g, '/');
+    return path === norm || path.startsWith(prefix);
+  });
+  if (removed.length === 0) return 0;
+  for (const d of removed) revokePreview(d.id);
+  const removeIds = new Set(removed.map((d) => d.id));
+  store = store.filter((d) => !removeIds.has(d.id));
+  notify();
+  void Promise.all(removed.map((d) => idbDeleteDoc(d.id)));
+  void import('./db/library').then(({ removeDocumentFromLibrary }) => {
+    for (const d of removed) void removeDocumentFromLibrary(d.id);
+  });
+  return removed.length;
+}
+
 export function removeUploadedDocByLocalKey(localFileKey: string): void {
   const removed = store.filter((d) => d.localFileKey === localFileKey);
   for (const d of removed) revokePreview(d.id);
