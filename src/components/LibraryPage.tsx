@@ -510,8 +510,11 @@ export default function LibraryPage() {
                 <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
                   Folders
                 </span>
-                <span className="text-[11px] text-gray-400 tabular-nums">
-                  {stats.folders}
+                <span
+                  className="text-[10px] text-gray-400 truncate"
+                  title="Right-click a folder to delete it"
+                >
+                  right-click to delete
                 </span>
               </div>
               <nav className="flex-1 overflow-y-auto py-2 px-1.5" aria-label="Folder tree">
@@ -521,6 +524,7 @@ export default function LibraryPage() {
                   depth={0}
                   onNavigate={navigateToFolder}
                   onFolderContextMenu={openFolderMenu}
+                  onDeleteFolder={deleteFolder}
                 />
               </nav>
             </aside>
@@ -765,12 +769,14 @@ function FolderTreeNav({
   depth,
   onNavigate,
   onFolderContextMenu,
+  onDeleteFolder,
 }: {
   folder: TreeFolder;
   currentPath: string;
   depth: number;
   onNavigate: (path: string) => void;
   onFolderContextMenu: (e: React.MouseEvent, path: string, name: string) => void;
+  onDeleteFolder: (path: string) => void;
 }) {
   const isRoot = folder.path === '';
   const isActive = currentPath === folder.path;
@@ -784,58 +790,77 @@ function FolderTreeNav({
   }, [isAncestor]);
 
   return (
-    <div
-      onContextMenu={
-        isRoot
-          ? undefined
-          : (e) => onFolderContextMenu(e, folder.path, folder.name)
-      }
-    >
-      <button
-        type="button"
-        onClick={() => {
-          onNavigate(folder.path);
-          if (!isRoot) setOpen(true);
-        }}
+    <div>
+      <div
         className={classNames(
-          'lib-tree-item w-full',
-          isActive && 'lib-tree-item-active'
+          'lib-tree-row group',
+          isActive && 'lib-tree-row-active'
         )}
-        style={{ paddingLeft: `${10 + depth * 12}px` }}
-        title={isRoot ? undefined : 'Right-click to delete folder'}
+        style={{ paddingLeft: `${6 + depth * 12}px` }}
+        onContextMenu={
+          isRoot
+            ? undefined
+            : (e) => onFolderContextMenu(e, folder.path, folder.name)
+        }
       >
+        <button
+          type="button"
+          onClick={() => {
+            onNavigate(folder.path);
+            if (!isRoot) setOpen(true);
+          }}
+          className="lib-tree-item flex-1 min-w-0"
+          title={isRoot ? undefined : 'Right-click to delete folder'}
+        >
+          {!isRoot ? (
+            <span
+              role="presentation"
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen((o) => !o);
+              }}
+              className="lib-tree-chevron"
+            >
+              <ChevronRight
+                className={classNames(
+                  'w-3 h-3 transition-transform',
+                  open && 'rotate-90'
+                )}
+                strokeWidth={2}
+              />
+            </span>
+          ) : (
+            <span className="w-3.5 shrink-0" />
+          )}
+          {isRoot ? (
+            <Home className="w-3.5 h-3.5 shrink-0" strokeWidth={1.6} />
+          ) : open ? (
+            <FolderOpen className="w-3.5 h-3.5 shrink-0 text-un-blue" strokeWidth={1.6} />
+          ) : (
+            <Folder className="w-3.5 h-3.5 shrink-0" strokeWidth={1.6} />
+          )}
+          <span className="truncate flex-1 text-left">
+            {isRoot ? 'All files' : folder.name}
+          </span>
+          <span className="text-[10px] text-gray-400 tabular-nums shrink-0">
+            {countFilesRecursive(folder)}
+          </span>
+        </button>
         {!isRoot && (
-          <span
-            role="presentation"
+          <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
-              setOpen((o) => !o);
+              onDeleteFolder(folder.path);
             }}
-            className="lib-tree-chevron"
+            aria-label={`Delete folder ${folder.name}`}
+            title="Delete folder"
+            className="lib-tree-delete"
           >
-            <ChevronRight
-              className={classNames(
-                'w-3 h-3 transition-transform',
-                open && 'rotate-90'
-              )}
-              strokeWidth={2}
-            />
-          </span>
+            <Trash2 className="w-3 h-3" strokeWidth={1.75} />
+          </button>
         )}
-        {isRoot ? (
-          <Home className="w-3.5 h-3.5 shrink-0" strokeWidth={1.6} />
-        ) : open ? (
-          <FolderOpen className="w-3.5 h-3.5 shrink-0 text-un-blue" strokeWidth={1.6} />
-        ) : (
-          <Folder className="w-3.5 h-3.5 shrink-0" strokeWidth={1.6} />
-        )}
-        <span className="truncate flex-1 text-left">
-          {isRoot ? 'All files' : folder.name}
-        </span>
-        <span className="text-[10px] text-gray-400 tabular-nums shrink-0">
-          {countFilesRecursive(folder)}
-        </span>
-      </button>
+      </div>
       {(isRoot || open) &&
         folder.folders.map((child) => (
           <FolderTreeNav
@@ -845,6 +870,7 @@ function FolderTreeNav({
             depth={depth + 1}
             onNavigate={onNavigate}
             onFolderContextMenu={onFolderContextMenu}
+            onDeleteFolder={onDeleteFolder}
           />
         ))}
     </div>
