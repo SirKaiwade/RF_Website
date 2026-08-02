@@ -581,8 +581,8 @@ export default function LibraryPage() {
 
                 <p className="mt-10 text-[12px] text-gray-500 max-w-2xl leading-relaxed">
                   {cloud
-                    ? 'Upload a whole folder tree — paths are preserved so you can ask Nexus “where are the numbers for X?” and jump straight to the file. Documents sync to the shared UNU Global Health library.'
-                    : 'Upload a whole folder tree — paths are preserved so search and Nexus can tell you exactly where a file lives. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to sync a shared team library.'}
+                    ? 'Original files are stored for preview; extracted text is indexed behind them. Nexus searches the library and only pulls the most relevant files into each answer — so you can upload large folder trees. Documents also sync to the shared UNU Global Health library.'
+                    : 'Original files are stored for preview; extracted text is indexed behind them. Nexus searches the library and only pulls the most relevant files into each answer — so you can upload large folder trees. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to sync a shared team library.'}
                 </p>
               </div>
             </div>
@@ -849,9 +849,18 @@ function FileRow({
       )}
     >
       <button type="button" onClick={onOpen} className="lib-browser-file-main">
-        <span className="text-gray-500 shrink-0">
-          <KindIcon kind={kind} />
-        </span>
+        {doc.previewUrl ? (
+          <img
+            src={doc.previewUrl}
+            alt=""
+            className="w-9 h-11 object-cover object-top rounded-sm border border-rule shrink-0 bg-white"
+            draggable={false}
+          />
+        ) : (
+          <span className="text-gray-500 shrink-0">
+            <KindIcon kind={kind} />
+          </span>
+        )}
         <span className="flex-1 min-w-0 text-left">
           <span className="block truncate text-[13px] font-medium text-ink" title={name}>
             {name}

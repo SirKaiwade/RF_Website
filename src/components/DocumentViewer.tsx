@@ -20,7 +20,7 @@ import { getPublication } from '../data/publications';
 import { eventDateLabel, eventToText, publicationToText } from '../lib/corpusText';
 import { FreshnessLabel, Avatar } from './ui';
 import { formatBytes, formatDate, formatRelative } from '../lib/format';
-import { useUploadedDocs, type UploadedDoc } from '../lib/uploads';
+import { useUploadedDocs, useDocFileUrl, type UploadedDoc } from '../lib/uploads';
 import { docBreadcrumbPath } from '../lib/libraryTree';
 import { findHighlight, type HighlightMatchKind } from '../lib/highlight';
 import { classNames } from '../lib/format';
@@ -295,13 +295,17 @@ function UploadedView({
     [doc.text, highlight]
   );
   const breadcrumb = docBreadcrumbPath(doc);
+  const fileUrl = useDocFileUrl(doc.hasOriginalFile ? doc.id : null);
+  const isPdf =
+    (doc.mimeType === 'application/pdf' ||
+      doc.filename.toLowerCase().endsWith('.pdf')) &&
+    Boolean(fileUrl);
 
   const markRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (!match || !markRef.current) return;
     const el = markRef.current;
-    // requestAnimationFrame so the layout has settled before scrolling.
     const id = requestAnimationFrame(() => {
       el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     });
@@ -336,7 +340,11 @@ function UploadedView({
         <div className="px-6 py-6">
           <div className="flex flex-wrap items-center gap-1.5 mb-3">
             <span className="chip chip-green">Saved</span>
-            <span className="chip chip-gray">Uploaded</span>
+            {doc.hasOriginalFile ? (
+              <span className="chip chip-blue">Original file</span>
+            ) : (
+              <span className="chip chip-gray">Text only</span>
+            )}
           </div>
           <h1 className="font-display font-bold text-display-m leading-tight mb-2 break-words">
             {doc.filename}
@@ -349,15 +357,38 @@ function UploadedView({
             {formatRelative(doc.uploadedAt)}
           </div>
 
+          {isPdf && fileUrl && (
+            <section className="mb-6">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <h2 className="text-overline uppercase font-semibold text-gray-500">
+                  File preview
+                </h2>
+                <a
+                  href={fileUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] font-semibold text-un-blue hover:underline"
+                >
+                  Open PDF
+                </a>
+              </div>
+              <iframe
+                title={doc.filename}
+                src={fileUrl}
+                className="w-full h-[42vh] min-h-[240px] rounded-sm border border-rule bg-white"
+              />
+            </section>
+          )}
+
           {highlight && (
             <CitedPassage highlight={highlight} matchKind={match?.kind ?? null} />
           )}
 
           <section className="mb-6">
             <h2 className="text-overline uppercase font-semibold text-gray-500 mb-2">
-              Source text
+              Extracted text
             </h2>
-            <div className="text-[12px] text-gray-700 whitespace-pre-wrap font-mono bg-gray-50 border border-rule rounded-sm p-3 max-h-[60vh] overflow-y-auto leading-relaxed">
+            <div className="text-[12px] text-gray-700 whitespace-pre-wrap font-mono bg-gray-50 border border-rule rounded-sm p-3 max-h-[40vh] overflow-y-auto leading-relaxed">
               <HighlightedText
                 text={doc.text}
                 match={match}
@@ -366,22 +397,22 @@ function UploadedView({
               />
             </div>
             <div className="mt-2 text-[11px] text-gray-500">
-              {doc.charCount.toLocaleString()} characters extracted.
+              {doc.charCount.toLocaleString()} characters indexed for search.
               {highlight
                 ? match
                   ? match.kind === 'paraphrase'
                     ? ' Approximate passage match highlighted below.'
                     : ' Verified passages are highlighted below.'
                   : ' Could not locate this passage in the extracted text.'
-                : ' Use Find in document from the sources panel to locate a citation.'}
+                : ' Nexus searches this text; the original file is kept for preview.'}
             </div>
           </section>
         </div>
       </div>
 
       <div className="border-t border-rule p-4 bg-gray-50 shrink-0 text-[11px] text-gray-500 leading-tight">
-        This file lives only in your browser tab. Refresh or close the tab and it's gone —
-        that's by design until persistence is wired up.
+        Original file + extracted text are stored in this browser. Nexus retrieves
+        relevant files per question instead of loading the whole library into the prompt.
       </div>
     </aside>
   );

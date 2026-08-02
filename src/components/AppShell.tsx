@@ -55,10 +55,13 @@ export default function AppShell() {
     });
   }
 
-  // Sync shared records + hydrate durable library (localStorage already loaded in uploads.ts).
+  // Sync shared records + hydrate durable library (IndexedDB + optional Supabase).
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      const { initLibraryStore } = await import('../lib/uploads');
+      await initLibraryStore();
+      if (cancelled) return;
       const [dataResult, sharedDocs] = await Promise.all([
         initLocalDataSync(),
         supabaseConfigured() ? loadSharedLibrary() : Promise.resolve(null),

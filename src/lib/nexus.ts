@@ -5,6 +5,10 @@ import { eventsStore } from '../data/events';
 import { publicationsStore } from '../data/publications';
 import { eventToText, publicationToText } from './corpusText';
 import { supabaseConfigured } from './supabase';
+import {
+  retrieveLibraryDocs,
+  type LibraryCatalogEntry,
+} from './retrieve';
 import type { UploadedDoc } from './uploads';
 import type { ChatMessage } from '../types/chat';
 import type { SourceReference } from '../types';
@@ -60,7 +64,11 @@ export interface NexusResult {
   noAnswer: boolean;
 }
 
-function buildSystemPrompt(uploadedDocs: UploadedDoc[]): string {
+function buildSystemPrompt(
+  retrievedDocs: UploadedDoc[],
+  catalog: LibraryCatalogEntry[],
+  totalLibraryDocs: number
+): string {
   const docBlocks = documents
     .map(
       (d) => `<doc id="${d.id}">
@@ -103,7 +111,16 @@ function buildSystemPrompt(uploadedDocs: UploadedDoc[]): string {
     .map((p) => `<publication id="${p.id}">\n${publicationToText(p)}\n</publication>`)
     .join('\n\n');
 
-  const uploadedBlocks = uploadedDocs
+  const catalogBlocks = catalog
+    .map(
+      (c) =>
+        `<file id="${c.id}" path="${c.path}" breadcrumb="${c.breadcrumb}" chars="${c.charCount}"${
+          c.pageCount ? ` pages="${c.pageCount}"` : ''
+        }>${c.filename}</file>`
+    )
+    .join('\n');
+
+  const uploadedBlocks = retrievedDocs
     .map((u) => {
       const path = (u.localRelativePath || u.filename).replace(/\\/g, '/');
       const parts = path.split('/').filter(Boolean);
@@ -131,15 +148,20 @@ function buildSystemPrompt(uploadedDocs: UploadedDoc[]): string {
     })
     .join('\n\n');
 
-  const uploadedSection = uploadedDocs.length
-    ? `\n\n<user_uploaded_documents>
-The user has uploaded the following document(s) to the knowledge library. Treat them as first-class corpus members. They take precedence when the question is clearly about them. Cite them by their id (which starts with "up-") just like any seed doc.
+  let uploadedSection = '';
+  if (totalLibraryDocs > 0) {
+    uploadedSection = `\n\n<knowledge_library total_files="${totalLibraryDocs}">
+The knowledge library may contain many files. You receive (1) a complete <library_catalog> of every file path so you can answer "where is…" questions, and (2) <retrieved_documents> — the subset most relevant to this question, with extractable text. Prefer retrieved docs for factual claims. For location questions, use catalog breadcrumbs even if a file was not fully retrieved. Cite retrieved docs by id (starts with "up-"). When pointing to a location, use Folder > Subfolder > file breadcrumbs and markdown links like [budget.xlsx](/library?path=Finance/2024&file=up-abc).
 
-Each document has a <breadcrumb> pin-point location using " > " separators (e.g. "Finance > 2024 > Q1 > budget.xlsx"), a slash <path>, and a <library_link> deep link. When the user asks where something lives, which folder holds a number, or how to find a file, answer with the exact <breadcrumb> and include a markdown link using the exact library_link value, e.g. You can find it at **Finance > 2024 > Q1 > [budget.xlsx](/library?path=Finance/2024/Q1&file=up-abc).** Still cite sources with [n] and verbatim excerpts as usual.
+<library_catalog>
+${catalogBlocks}
+</library_catalog>
 
-${uploadedBlocks}
-</user_uploaded_documents>`
-    : '';
+<retrieved_documents count="${retrievedDocs.length}">
+${uploadedBlocks || '(No strongly matching file bodies for this question — use the catalog for locations, or set noAnswer if content is required.)'}
+</retrieved_documents>
+</knowledge_library>`;
+  }
 
   const corpus = `<corpus>\n<documents>\n${docBlocks}\n</documents>\n\n<people>\n${peopleBlocks}\n</people>\n\n<events_2026>\n${eventBlocks}\n</events_2026>\n\n<publications_2026>\n${publicationBlocks}\n</publications_2026>\n</corpus>${uploadedSection}`;
 
@@ -153,7 +175,7 @@ ${uploadedBlocks}
 
 Today's date is ${today}. Use it to reason about which events are upcoming versus past.
 
-Your job: answer questions about UNU Global Health's work using ONLY the corpus below. The corpus contains documents (reports, briefs, meeting notes, datasets, etc.), the people behind them, the 2026 events matrix (every convening UNU Global Health runs or contributes to: conferences, webinars, workshops, policy dialogues, consultations, partnership meetings, and side events), and the 2026 publications database (journal articles, policy briefs, reports, book chapters, and web articles). Events (ids starting "ev-") and publications (ids starting "pub-") are first-class, citable corpus entries — cite them like documents, quoting verbatim from their entry text. Uploaded library documents are equally citable and persist across sessions.
+Your job: answer questions about UNU Global Health's work using ONLY the corpus below. The corpus contains documents (reports, briefs, meeting notes, datasets, etc.), the people behind them, the 2026 events matrix (every convening UNU Global Health runs or contributes to: conferences, webinars, workshops, policy dialogues, consultations, partnership meetings, and side events), and the 2026 publications database (journal articles, policy briefs, reports, book chapters, and web articles). Events (ids starting "ev-") and publications (ids starting "pub-") are first-class, citable corpus entries — cite them like documents, quoting verbatim from their entry text. The knowledge library may hold far more files than fit in one prompt: a catalog lists every file; retrieved document bodies are the ones searched for this question.
 
 Rules:
 - Ground every claim in the corpus. Never invent facts, dates, names, or findings.
@@ -161,7 +183,7 @@ Rules:
 - Cite every claim inline using [1], [2], [3] markers. The number maps to the position in the sources array (1-indexed).
 - For EVERY source you cite, the "excerpt" field MUST be a verbatim, contiguous quote copied character-for-character from that document's text — no paraphrasing, no ellipses inside the quote, no summarising. Pick the single sentence or sentence fragment that most directly supports the claim. 1–3 sentences max. The UI will use this exact string to highlight the passage in the source — if the quote is paraphrased it will fail to highlight and the user will see a warning.
 - If you cannot find a verbatim sentence that supports a claim, do not cite it; either drop the claim or set noAnswer=true.
-- Location questions ("where do I find…", "which folder has…", "where are the numbers for…"): lead with the document's <breadcrumb> in "Folder > Subfolder > file" form and a markdown hyperlink using that document's <library_link>. Example: "You can find it at **Finance > 2024 > Q1 > [budget.xlsx](/library?path=Finance/2024/Q1&file=up-abc).**" Still include a normal [n] citation with a verbatim excerpt from the file.
+- Location questions ("where do I find…", "which folder has…", "where are the numbers for…"): lead with the document's breadcrumb in "Folder > Subfolder > file" form from the library catalog (or retrieved doc) and a markdown hyperlink to /library?path=…&file=…. Example: "You can find it at **Finance > 2024 > Q1 > [budget.xlsx](/library?path=Finance/2024/Q1&file=up-abc).**" Still include a normal [n] citation with a verbatim excerpt when the body was retrieved.
 - Use **bold** sparingly for key entities, project names, and findings.
 - Order sources by importance to the answer.
 - For roll-up questions across the events matrix or publications database (counts, upcoming events, who leads what, reach numbers), synthesise across entries and cite the most relevant individual entries — at most 6 sources. State plainly when many entries have missing fields (e.g. participant counts not yet reported).
@@ -267,6 +289,11 @@ export async function askNexus(
     };
   }
 
+  const { retrieved, catalog, totalLibraryDocs } = retrieveLibraryDocs(
+    question,
+    uploadedDocs
+  );
+
   const messages: Anthropic.MessageParam[] = [
     ...historyToMessages(history),
     { role: 'user', content: question },
@@ -275,7 +302,7 @@ export async function askNexus(
   const payload: Anthropic.MessageCreateParamsNonStreaming = {
     model: MODEL,
     max_tokens: 2000,
-    system: buildSystemPrompt(uploadedDocs),
+    system: buildSystemPrompt(retrieved, catalog, totalLibraryDocs),
     tools: [ANSWER_TOOL],
     tool_choice: { type: 'tool', name: 'answer' },
     messages,

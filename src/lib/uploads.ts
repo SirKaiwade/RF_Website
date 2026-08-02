@@ -1,5 +1,14 @@
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { isSpreadsheetFile, readSpreadsheet, sheetsToText } from './spreadsheet';
+import {
+  idbClearAll,
+  idbDeleteDoc,
+  idbGetBlob,
+  idbLoadAllDocs,
+  idbPutBlob,
+  idbPutDoc,
+  idbPutDocs,
+} from './libraryIdb';
 
 export type DocSource = 'upload' | 'local' | 'sharepoint';
 
@@ -8,33 +17,86 @@ export interface UploadedDoc {
   filename: string;
   bytes: number;
   uploadedAt: string;
+  /** Extracted searchable text — stored behind the original file. */
   text: string;
   pageCount?: number;
   charCount: number;
-  /** First-page thumbnail (data URL) when available — currently PDFs. */
+  /** Ephemeral thumbnail / object URL — not durable. */
   previewUrl?: string;
+  mimeType?: string;
+  /** True when the original file bytes are in IndexedDB. */
+  hasOriginalFile?: boolean;
   source?: DocSource;
   /** Stable key for docs synced from a local folder (path + modified time). */
   localFileKey?: string;
-  /** Path within the local library folder, e.g. "reports/q1.pdf". */
+  /** Path within the library folder tree, e.g. "reports/q1.pdf". */
   localRelativePath?: string;
-  /** True once this doc is saved to the shared Supabase library (visible to all staff). */
+  /** True once this doc is saved to the shared Supabase library. */
   shared?: boolean;
 }
 
-// Soft caps. Per-doc, we trim to ~80k chars (~20k tokens). Total library cap is ~250k chars
-// so the corpus prompt stays well under the model's context window even with seed docs.
-const MAX_PER_DOC_CHARS = 80_000;
-export const MAX_TOTAL_UPLOADED_CHARS = 250_000;
+/** Soft per-file size limit for uploads (original binary). */
+export const MAX_FILE_BYTES = 40 * 1024 * 1024;
 
-const STORAGE_KEY = 'nexus:library-docs';
+const LEGACY_STORAGE_KEY = 'nexus:library-docs';
 
-let store: UploadedDoc[] = loadFromLocalStorage();
+let store: UploadedDoc[] = [];
+let ready = false;
 const listeners = new Set<() => void>();
+const objectUrls = new Map<string, string>();
 
-function loadFromLocalStorage(): UploadedDoc[] {
+function notify() {
+  listeners.forEach((l) => l());
+}
+
+function emitSnapshot(): UploadedDoc[] {
+  return store;
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function revokePreview(id: string) {
+  const url = objectUrls.get(id);
+  if (url) {
+    URL.revokeObjectURL(url);
+    objectUrls.delete(id);
+  }
+}
+
+function persistDocAsync(doc: UploadedDoc): void {
+  const { previewUrl: _p, ...rest } = doc;
+  void idbPutDoc(rest).catch((err) =>
+    console.warn('[Nexus] IndexedDB save failed:', err)
+  );
+}
+
+function persistAllAsync(): void {
+  const slim = store.map(({ previewUrl: _p, ...rest }) => rest);
+  void idbPutDocs(slim).catch((err) =>
+    console.warn('[Nexus] IndexedDB bulk save failed:', err)
+  );
+}
+
+function normalizeDoc(d: UploadedDoc): UploadedDoc {
+  return {
+    ...d,
+    bytes: typeof d.bytes === 'number' ? d.bytes : d.text.length,
+    charCount: typeof d.charCount === 'number' ? d.charCount : d.text.length,
+    uploadedAt: d.uploadedAt || new Date().toISOString(),
+    localRelativePath:
+      typeof d.localRelativePath === 'string' && d.localRelativePath.trim()
+        ? d.localRelativePath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
+        : d.filename,
+    previewUrl: undefined,
+  };
+}
+
+function loadLegacyLocalStorage(): UploadedDoc[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
@@ -47,49 +109,39 @@ function loadFromLocalStorage(): UploadedDoc[] {
           typeof (d as UploadedDoc).filename === 'string' &&
           typeof (d as UploadedDoc).text === 'string'
       )
-      .map((d) => ({
-        ...d,
-        bytes: typeof d.bytes === 'number' ? d.bytes : d.text.length,
-        charCount: typeof d.charCount === 'number' ? d.charCount : d.text.length,
-        uploadedAt: d.uploadedAt || new Date().toISOString(),
-        // Every file needs a pin-pointable path (at least the filename).
-        localRelativePath:
-          typeof d.localRelativePath === 'string' && d.localRelativePath.trim()
-            ? d.localRelativePath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')
-            : d.filename,
-        // Previews are large data URLs — not restored from disk.
-        previewUrl: undefined,
-      }));
+      .map(normalizeDoc);
   } catch {
     return [];
   }
 }
 
-/** Persist text + metadata. Skip previewUrl to stay under localStorage quotas. */
-function persistToLocalStorage(): void {
+/**
+ * Load library from IndexedDB (and migrate legacy localStorage once).
+ * Call once on app boot — e.g. from AppShell.
+ */
+export async function initLibraryStore(): Promise<void> {
+  if (ready) return;
   try {
-    const slim = store.map(({ previewUrl: _preview, ...rest }) => rest);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(slim));
+    let docs = (await idbLoadAllDocs<UploadedDoc>()).map(normalizeDoc);
+    if (docs.length === 0) {
+      const legacy = loadLegacyLocalStorage();
+      if (legacy.length > 0) {
+        docs = legacy;
+        await idbPutDocs(legacy.map(({ previewUrl: _p, ...rest }) => rest));
+        try {
+          localStorage.removeItem(LEGACY_STORAGE_KEY);
+        } catch {
+          // ignore
+        }
+      }
+    }
+    store = docs.sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt));
   } catch (err) {
-    console.warn(
-      '[Nexus] Could not persist library to localStorage:',
-      err instanceof Error ? err.message : err
-    );
+    console.warn('[Nexus] Library IndexedDB init failed, using memory only:', err);
+    store = loadLegacyLocalStorage();
   }
-}
-
-function notify() {
-  persistToLocalStorage();
-  listeners.forEach((l) => l());
-}
-
-function emitSnapshot(): UploadedDoc[] {
-  return store;
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+  ready = true;
+  notify();
 }
 
 export function useUploadedDocs(): UploadedDoc[] {
@@ -105,8 +157,10 @@ export function totalUploadedChars(): number {
 }
 
 export function removeUploadedDoc(id: string): void {
+  revokePreview(id);
   store = store.filter((d) => d.id !== id);
   notify();
+  void idbDeleteDoc(id);
   void import('./db/library').then(({ removeDocumentFromLibrary }) =>
     removeDocumentFromLibrary(id)
   );
@@ -114,9 +168,11 @@ export function removeUploadedDoc(id: string): void {
 
 export function removeUploadedDocByLocalKey(localFileKey: string): void {
   const removed = store.filter((d) => d.localFileKey === localFileKey);
+  for (const d of removed) revokePreview(d.id);
   store = store.filter((d) => d.localFileKey !== localFileKey);
   notify();
   if (removed.length === 0) return;
+  void Promise.all(removed.map((d) => idbDeleteDoc(d.id)));
   void import('./db/library').then(({ removeDocumentFromLibrary }) => {
     for (const d of removed) void removeDocumentFromLibrary(d.id);
   });
@@ -128,8 +184,10 @@ export function getLocalSyncedDocs(): UploadedDoc[] {
 
 export function clearUploadedDocs(): void {
   const ids = store.map((d) => d.id);
+  for (const id of ids) revokePreview(id);
   store = [];
   notify();
+  void idbClearAll();
   void import('./db/library').then(({ removeDocumentFromLibrary }) => {
     for (const id of ids) void removeDocumentFromLibrary(id);
   });
@@ -143,42 +201,38 @@ export function hydrateSharedDocs(docs: UploadedDoc[]): void {
     const existing = byId.get(incoming.id);
     if (!existing) {
       byId.set(incoming.id, {
-        ...incoming,
+        ...normalizeDoc(incoming),
         shared: true,
-        localRelativePath: incoming.localRelativePath || incoming.filename,
       });
       continue;
     }
-    // Prefer the longer text body; always mark cloud-backed docs as shared.
     const text =
       (incoming.text?.length ?? 0) > (existing.text?.length ?? 0)
         ? incoming.text
         : existing.text;
     byId.set(incoming.id, {
       ...existing,
-      ...incoming,
+      ...normalizeDoc(incoming),
       text,
       charCount: text.length,
       shared: true,
-      localRelativePath:
-        incoming.localRelativePath ||
-        existing.localRelativePath ||
-        incoming.filename ||
-        existing.filename,
+      hasOriginalFile: existing.hasOriginalFile,
+      mimeType: existing.mimeType ?? incoming.mimeType,
       previewUrl: existing.previewUrl ?? incoming.previewUrl,
     });
   }
   store = [...byId.values()].sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt));
+  persistAllAsync();
   notify();
 }
 
-/** Flip a doc's `shared` flag after it's been successfully saved to the shared library. */
 export function markDocShared(id: string): void {
   store = store.map((d) => (d.id === id ? { ...d, shared: true } : d));
+  const doc = store.find((d) => d.id === id);
+  if (doc) persistDocAsync(doc);
   notify();
 }
 
-/** Push any docs that are only local up to Supabase (e.g. after refresh / offline upload). */
 export async function syncUnsharedDocsToCloud(
   uploaderEmail: string
 ): Promise<void> {
@@ -187,6 +241,41 @@ export async function syncUnsharedDocsToCloud(
   for (const doc of pending) {
     await persistDocToCloud(doc, uploaderEmail);
   }
+}
+
+/** Object URL for the original file (PDF preview / download). Revoked on remove. */
+export async function getDocFileUrl(id: string): Promise<string | null> {
+  const existing = objectUrls.get(id);
+  if (existing) return existing;
+  const row = await idbGetBlob(id);
+  if (!row?.blob) return null;
+  const url = URL.createObjectURL(row.blob);
+  objectUrls.set(id, url);
+  return url;
+}
+
+export async function getDocFileBlob(id: string): Promise<Blob | null> {
+  const row = await idbGetBlob(id);
+  return row?.blob ?? null;
+}
+
+/** React helper: live object URL for a library file's original bytes. */
+export function useDocFileUrl(id: string | null | undefined): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!id) {
+      setUrl(null);
+      return;
+    }
+    void getDocFileUrl(id).then((u) => {
+      if (!cancelled) setUrl(u);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+  return url;
 }
 
 function uid(): string {
@@ -210,8 +299,6 @@ async function ensurePdfjs() {
 async function extractPdfTextAndPreview(
   file: File
 ): Promise<{ text: string; pageCount: number; previewUrl?: string }> {
-  // Dynamically imported — pdf.js (plus its worker chunk) only downloads
-  // when someone actually uploads a PDF, not on every authenticated page load.
   const pdfjs = await ensurePdfjs();
 
   const buf = await file.arrayBuffer();
@@ -239,7 +326,6 @@ async function extractPdfTextAndPreview(
     canvas.height = Math.ceil(viewport.height);
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      // pdfjs v4 uses `canvas` in the render params; keep canvasContext for older typings.
       await page.render({
         canvasContext: ctx,
         viewport,
@@ -265,6 +351,18 @@ async function extractDocxText(file: File): Promise<string> {
   return result.value;
 }
 
+function guessMime(file: File, isPdf: boolean, isDocx: boolean, isSheet: boolean): string {
+  if (file.type) return file.type;
+  if (isPdf) return 'application/pdf';
+  if (isDocx) {
+    return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  }
+  if (isSheet) {
+    return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  }
+  return 'application/octet-stream';
+}
+
 export interface UploadResult {
   ok: boolean;
   doc?: UploadedDoc;
@@ -277,9 +375,6 @@ export interface IngestMeta {
   localRelativePath?: string;
 }
 
-/** Prefer explicit meta, then browser folder-upload path (webkitRelativePath).
- *  Always returns a path — at minimum the filename — so every file is pin-pointable.
- */
 function resolveRelativePath(
   file: File,
   meta?: IngestMeta,
@@ -324,10 +419,10 @@ export async function ingestFile(
     };
   }
 
-  if (file.size > 25 * 1024 * 1024) {
+  if (file.size > MAX_FILE_BYTES) {
     return {
       ok: false,
-      error: `${file.name} is over 25 MB. Trim it or split it before uploading.`,
+      error: `${file.name} is over ${Math.round(MAX_FILE_BYTES / (1024 * 1024))} MB.`,
     };
   }
 
@@ -366,31 +461,25 @@ export async function ingestFile(
     };
   }
 
-  const truncated = text.length > MAX_PER_DOC_CHARS;
-  if (truncated) {
-    text = text.slice(0, MAX_PER_DOC_CHARS) + '\n\n[…truncated for context window]';
-  }
-
   const localRelativePath = resolveRelativePath(file, meta, destinationFolder);
+  const mimeType = guessMime(file, isPdf, isDocx, isSheet);
 
-  // Replace existing docs at the same path (folder re-upload) or local sync key.
-  let replacedChars = 0;
+  // Replace existing docs at the same path or local sync key.
+  const removedIds: string[] = [];
   if (meta?.localFileKey) {
-    const prev = store.filter((d) => d.localFileKey === meta.localFileKey);
-    replacedChars += prev.reduce((s, d) => s + d.charCount, 0);
+    for (const d of store.filter((x) => x.localFileKey === meta.localFileKey)) {
+      removedIds.push(d.id);
+    }
     store = store.filter((d) => d.localFileKey !== meta.localFileKey);
   } else if (localRelativePath) {
-    const prev = store.filter((d) => d.localRelativePath === localRelativePath);
-    replacedChars += prev.reduce((s, d) => s + d.charCount, 0);
+    for (const d of store.filter((x) => x.localRelativePath === localRelativePath)) {
+      removedIds.push(d.id);
+    }
     store = store.filter((d) => d.localRelativePath !== localRelativePath);
   }
-
-  const newTotal = totalUploadedChars() - replacedChars + text.length;
-  if (newTotal > MAX_TOTAL_UPLOADED_CHARS) {
-    return {
-      ok: false,
-      error: `Adding ${file.name} would exceed the library corpus limit (~${Math.round(MAX_TOTAL_UPLOADED_CHARS / 1000)}k chars). Remove a document first.`,
-    };
+  for (const id of removedIds) {
+    revokePreview(id);
+    void idbDeleteDoc(id);
   }
 
   const doc: UploadedDoc = {
@@ -402,6 +491,8 @@ export async function ingestFile(
     pageCount,
     charCount: text.length,
     previewUrl,
+    mimeType,
+    hasOriginalFile: true,
     source: meta?.source ?? 'upload',
     localFileKey: meta?.localFileKey,
     localRelativePath,
@@ -409,6 +500,11 @@ export async function ingestFile(
 
   store = [...store, doc];
   notify();
+  persistDocAsync(doc);
+  void idbPutBlob(doc.id, file, mimeType, file.name).catch((err) =>
+    console.warn('[Nexus] Could not store original file blob:', err)
+  );
+
   return { ok: true, doc };
 }
 
@@ -421,7 +517,6 @@ export async function ingestFiles(
   files: File[],
   options?: {
     skipUnsupported?: boolean;
-    /** Current library folder — single files are placed here. */
     destinationFolder?: string;
     onProgress?: (done: number, total: number, filename: string) => void;
   }
@@ -450,10 +545,6 @@ export async function ingestFiles(
   return { docs, errors };
 }
 
-/**
- * Persist an ingested doc to the shared Supabase library when cloud is configured.
- * Local browser storage is always updated via the store; this publishes for the whole team.
- */
 export async function persistDocToCloud(
   doc: UploadedDoc,
   uploaderEmail: string
