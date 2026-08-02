@@ -243,7 +243,8 @@ export default function LibraryPage() {
     }
     setUploading(false);
     setUploadProgress(null);
-    if (errs.length) setErrors(errs);
+    const visibleErrs = errs.filter((e) => !/corpus limit/i.test(e));
+    if (visibleErrs.length) setErrors(visibleErrs);
 
     // Stay put when uploading into the current folder; jump only for a new top-level tree drop.
     const nestedDrop = docs.find(

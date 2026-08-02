@@ -152,6 +152,7 @@ export function getUploadedDocs(): UploadedDoc[] {
   return store;
 }
 
+/** @deprecated No longer used — library size is unbounded; Nexus retrieves per question. */
 export function totalUploadedChars(): number {
   return store.reduce((sum, d) => sum + d.charCount, 0);
 }
@@ -419,6 +420,8 @@ export async function ingestFile(
   meta?: IngestMeta,
   destinationFolder?: string
 ): Promise<UploadResult> {
+  // Intentionally no total-library character cap. Original files + full extracted
+  // text are stored in IndexedDB; Nexus retrieves only relevant docs per question.
   const name = file.name.toLowerCase();
   const isPdf = name.endsWith('.pdf') || file.type === 'application/pdf';
   const isDocx =
@@ -561,7 +564,11 @@ export async function ingestFiles(
     ) {
       continue;
     }
-    if (r.error) errors.push(r.error);
+    if (r.error) {
+      // Old cached bundles used to emit this — never surface it.
+      if (/corpus limit/i.test(r.error)) continue;
+      errors.push(r.error);
+    }
   }
   return { docs, errors };
 }
