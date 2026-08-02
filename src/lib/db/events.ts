@@ -1,6 +1,7 @@
 import type { IIGHEvent, EventType, EventModality, EventLevel } from '../../types';
 import { getSupabase, supabaseConfigured } from '../supabase';
 import type { EventRow } from './types';
+import { upsertWithSchemaFallback } from './upsert';
 
 function toRow(e: IIGHEvent): EventRow {
   return {
@@ -95,10 +96,14 @@ export async function syncEvents(events: IIGHEvent[]): Promise<void> {
   if (!sb) return;
 
   if (events.length > 0) {
-    const { error } = await sb.from('events').upsert(events.map(toRow));
-    if (error) {
-      console.warn('[Nexus] Could not sync events to Supabase:', error.message);
-      return;
+    const result = await upsertWithSchemaFallback(
+      sb,
+      'events',
+      events.map((e) => toRow(e) as unknown as Record<string, unknown>)
+    );
+    if (!result.ok) {
+      console.warn('[Nexus] Could not sync events to Supabase:', result.error);
+      throw new Error(result.error ?? 'events sync failed');
     }
   }
 

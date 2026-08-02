@@ -116,12 +116,43 @@ export async function initLocalDataSync(): Promise<{ available: boolean; path?: 
     for (const name of Object.keys(COLLECTIONS) as LocalCollection[]) {
       const { store } = COLLECTIONS[name];
       const fromRemote = await SUPABASE_LOADERS[name]();
-      // null = load failed — keep whatever is already in the browser store.
-      // [] / rows = Supabase is authoritative (including intentionally empty).
-      if (fromRemote !== null) {
-        store.hydrate(fromRemote);
+      const local = store.get() as { id: string }[];
+
+      if (fromRemote === null) {
+        // Load failed — keep whatever is already in the browser store.
+      } else if (fromRemote.length === 0 && local.length > 0) {
+        // Remote empty but local has imports (often after a failed sync).
+        // Never wipe local — push local up once sync is wired.
+      } else if (fromRemote.length > 0) {
+        // Remote wins on id conflicts; keep any local-only rows not yet synced.
+        const byId = new Map(
+          (fromRemote as { id: string }[]).map((r) => [r.id, r])
+        );
+        for (const row of local) {
+          if (!byId.has(row.id)) byId.set(row.id, row);
+        }
+        store.hydrate([...byId.values()]);
+      } else {
+        store.hydrate([]);
       }
+
       store.setSync((records) => SUPABASE_SYNCERS[name](records));
+
+      // If we kept local data over an empty remote, push it now.
+      if (
+        fromRemote !== null &&
+        fromRemote.length === 0 &&
+        store.get().length > 0
+      ) {
+        try {
+          await SUPABASE_SYNCERS[name](store.get());
+        } catch (err) {
+          console.warn(
+            `[Nexus] Could not push local ${name} to Supabase after refresh:`,
+            err instanceof Error ? err.message : err
+          );
+        }
+      }
     }
     available = true;
     dataPath = undefined;

@@ -40,9 +40,11 @@ export function createRecordsStore<T extends { id: string }>(
   function load(): T[] {
     try {
       const raw = localStorage.getItem(storageKey);
-      if (!raw) return seed;
+      if (raw === null) return seed;
       const parsed = JSON.parse(raw) as T[];
-      return Array.isArray(parsed) && parsed.length > 0 ? parsed : seed;
+      // Preserve intentional empty arrays (don't fall back to seed and lose state).
+      if (Array.isArray(parsed)) return parsed;
+      return seed;
     } catch {
       return seed;
     }

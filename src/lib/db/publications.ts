@@ -1,6 +1,7 @@
 import type { Publication } from '../../types';
 import { getSupabase, supabaseConfigured } from '../supabase';
 import type { PublicationRow } from './types';
+import { upsertWithSchemaFallback } from './upsert';
 
 function toRow(p: Publication): PublicationRow {
   return {
@@ -73,10 +74,14 @@ export async function syncPublications(publications: Publication[]): Promise<voi
   if (!sb) return;
 
   if (publications.length > 0) {
-    const { error } = await sb.from('publications').upsert(publications.map(toRow));
-    if (error) {
-      console.warn('[Nexus] Could not sync publications to Supabase:', error.message);
-      return;
+    const result = await upsertWithSchemaFallback(
+      sb,
+      'publications',
+      publications.map((p) => toRow(p) as unknown as Record<string, unknown>)
+    );
+    if (!result.ok) {
+      console.warn('[Nexus] Could not sync publications to Supabase:', result.error);
+      throw new Error(result.error ?? 'publications sync failed');
     }
   }
 
