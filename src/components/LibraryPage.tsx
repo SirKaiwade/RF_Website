@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useOutletContext, useSearchParams } from 'react-router-dom';
 import {
   Upload,
@@ -115,6 +116,7 @@ export default function LibraryPage() {
     path: string;
     name: string;
   } | null>(null);
+  const folderMenuRef = useRef<HTMLDivElement>(null);
   const dragDepth = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -257,19 +259,30 @@ export default function LibraryPage() {
 
   useEffect(() => {
     if (!folderMenu) return;
-    function close() {
-      setFolderMenu(null);
-    }
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') close();
-    }
-    window.addEventListener('click', close);
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('keydown', onKey);
+
+    // Delay dismiss listeners so the same right-click mouseup/click doesn't
+    // instantly close the menu (common on macOS / Chrome).
+    let detach: (() => void) | undefined;
+    const timer = window.setTimeout(() => {
+      function onPointerDown(e: PointerEvent) {
+        const node = e.target as Node | null;
+        if (node && folderMenuRef.current?.contains(node)) return;
+        setFolderMenu(null);
+      }
+      function onKey(e: KeyboardEvent) {
+        if (e.key === 'Escape') setFolderMenu(null);
+      }
+      window.addEventListener('pointerdown', onPointerDown, true);
+      window.addEventListener('keydown', onKey);
+      detach = () => {
+        window.removeEventListener('pointerdown', onPointerDown, true);
+        window.removeEventListener('keydown', onKey);
+      };
+    }, 50);
+
     return () => {
-      window.removeEventListener('click', close);
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('keydown', onKey);
+      window.clearTimeout(timer);
+      detach?.();
     };
   }, [folderMenu]);
 
@@ -282,9 +295,14 @@ export default function LibraryPage() {
     e.stopPropagation();
     const norm = normalizeLibraryPath(path);
     if (!norm) return;
+    // Keep the menu on-screen.
+    const menuW = 180;
+    const menuH = 72;
+    const x = Math.min(e.clientX, window.innerWidth - menuW - 8);
+    const y = Math.min(e.clientY, window.innerHeight - menuH - 8);
     setFolderMenu({
-      x: e.clientX,
-      y: e.clientY,
+      x: Math.max(8, x),
+      y: Math.max(8, y),
       path: norm,
       name,
     });
@@ -613,32 +631,48 @@ export default function LibraryPage() {
                       ) : (
                         <div className="lib-browser list-panel">
                           {currentFolder.folders.map((folder) => (
-                            <button
+                            <div
                               key={folder.path}
-                              type="button"
-                              onClick={() => navigateToFolder(folder.path)}
+                              className="lib-browser-row lib-browser-folder group"
                               onContextMenu={(e) =>
                                 openFolderMenu(e, folder.path, folder.name)
                               }
-                              className="lib-browser-row lib-browser-folder"
-                              title="Right-click to delete folder"
                             >
-                              <Folder
-                                className="w-4 h-4 text-un-blue shrink-0"
-                                strokeWidth={1.6}
-                              />
-                              <span className="flex-1 min-w-0 text-left truncate font-medium text-ink">
-                                {folder.name}
-                              </span>
-                              <span className="text-[11px] text-gray-500 tabular-nums shrink-0">
-                                {countFilesRecursive(folder)} file
-                                {countFilesRecursive(folder) === 1 ? '' : 's'}
-                              </span>
-                              <ChevronRight
-                                className="w-3.5 h-3.5 text-gray-400 shrink-0"
-                                strokeWidth={1.75}
-                              />
-                            </button>
+                              <button
+                                type="button"
+                                onClick={() => navigateToFolder(folder.path)}
+                                className="lib-browser-file-main"
+                                title="Right-click to delete folder"
+                              >
+                                <Folder
+                                  className="w-4 h-4 text-un-blue shrink-0"
+                                  strokeWidth={1.6}
+                                />
+                                <span className="flex-1 min-w-0 text-left truncate font-medium text-ink">
+                                  {folder.name}
+                                </span>
+                                <span className="text-[11px] text-gray-500 tabular-nums shrink-0">
+                                  {countFilesRecursive(folder)} file
+                                  {countFilesRecursive(folder) === 1 ? '' : 's'}
+                                </span>
+                                <ChevronRight
+                                  className="w-3.5 h-3.5 text-gray-400 shrink-0"
+                                  strokeWidth={1.75}
+                                />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  deleteFolder(folder.path);
+                                }}
+                                aria-label={`Delete folder ${folder.name}`}
+                                title="Delete folder"
+                                className="p-1.5 rounded-sm text-gray-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-accent-red hover:bg-red-50 transition-opacity shrink-0"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                              </button>
+                            </div>
                           ))}
                           {currentFolder.files.map((doc) => (
                             <FileRow
@@ -674,28 +708,30 @@ export default function LibraryPage() {
         )}
       </div>
 
-      {folderMenu && (
-        <div
-          className="lib-ctx-menu"
-          style={{ top: folderMenu.y, left: folderMenu.x }}
-          role="menu"
-          onClick={(e) => e.stopPropagation()}
-          onContextMenu={(e) => e.preventDefault()}
-        >
-          <div className="lib-ctx-menu-label" title={folderMenu.path}>
-            {folderMenu.name}
-          </div>
-          <button
-            type="button"
-            role="menuitem"
-            className="lib-ctx-menu-item lib-ctx-menu-danger"
-            onClick={() => deleteFolder(folderMenu.path)}
+      {folderMenu &&
+        createPortal(
+          <div
+            ref={folderMenuRef}
+            className="lib-ctx-menu"
+            style={{ top: folderMenu.y, left: folderMenu.x }}
+            role="menu"
+            onContextMenu={(e) => e.preventDefault()}
           >
-            <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
-            Delete folder
-          </button>
-        </div>
-      )}
+            <div className="lib-ctx-menu-label" title={folderMenu.path}>
+              {folderMenu.name}
+            </div>
+            <button
+              type="button"
+              role="menuitem"
+              className="lib-ctx-menu-item lib-ctx-menu-danger"
+              onClick={() => deleteFolder(folderMenu.path)}
+            >
+              <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+              Delete folder
+            </button>
+          </div>,
+          document.body
+        )}
 
       {dragging && (
         <div
@@ -748,18 +784,19 @@ function FolderTreeNav({
   }, [isAncestor]);
 
   return (
-    <div>
+    <div
+      onContextMenu={
+        isRoot
+          ? undefined
+          : (e) => onFolderContextMenu(e, folder.path, folder.name)
+      }
+    >
       <button
         type="button"
         onClick={() => {
           onNavigate(folder.path);
           if (!isRoot) setOpen(true);
         }}
-        onContextMenu={
-          isRoot
-            ? undefined
-            : (e) => onFolderContextMenu(e, folder.path, folder.name)
-        }
         className={classNames(
           'lib-tree-item w-full',
           isActive && 'lib-tree-item-active'
