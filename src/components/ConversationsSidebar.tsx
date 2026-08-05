@@ -19,6 +19,7 @@ import type { Conversation } from '../types/chat';
 import { formatRelative, classNames } from '../lib/format';
 import { useAuth } from '../lib/auth';
 import { useTheme } from '../lib/theme';
+import { version as appVersion } from '../../package.json';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Chat', icon: MessageSquare, end: true as const },
@@ -315,6 +316,9 @@ export default function ConversationsSidebar({
                   {user?.name ?? 'Signed in'}
                 </div>
                 <div className="text-[11px] text-gray-500 truncate">{user?.email}</div>
+                <div className="text-[10px] text-gray-400 mt-0.5 tabular-nums tracking-wide">
+                  v{appVersion}
+                </div>
               </div>
               <button
                 type="button"
