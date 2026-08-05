@@ -30,16 +30,14 @@ import { supabaseConfigured } from '../lib/supabase';
 import Composer from './Composer';
 import AnswerMarkdown from './AnswerMarkdown';
 import SourcesPanel from './SourcesPanel';
-import SourceQuoteModal, {
-  quoteModalClosed,
-  quoteModalLoading,
-  type QuoteModalState,
-} from './SourceQuoteModal';
+import SelectionFindBar from './SelectionFindBar';
+import type { CitationRailState, CitationQuoteItem } from './CitationRail';
 import {
   buildCitationSlots,
   claimContextAroundCitation,
+  occurrenceCacheKey,
 } from '../lib/citations';
-import { resolveSourceQuote } from '../lib/nexus';
+import { findSupportingQuotes } from '../lib/nexus';
 import { getDocument } from '../data/documents';
 import { getEvent } from '../data/events';
 import { getPublication } from '../data/publications';
@@ -52,6 +50,7 @@ interface Props {
   onOpenDocument: (id: string, highlight?: string) => void;
   onToggleSave: (messageId: string) => void;
   openDocId: string | null;
+  setCitationRail: (state: CitationRailState | null) => void;
 }
 
 function hasFilePayload(e: React.DragEvent): boolean {
@@ -66,6 +65,7 @@ export default function ChatThread({
   onOpenDocument,
   onToggleSave,
   openDocId,
+  setCitationRail,
 }: Props) {
   const { user } = useAuth();
   const messages = conversation?.messages ?? [];
@@ -195,6 +195,7 @@ export default function ChatThread({
                   index={i}
                   onOpenDocument={onOpenDocument}
                   onToggleSave={onToggleSave}
+                  setCitationRail={setCitationRail}
                 />
               ))}
               <div ref={endRef} className="h-6" />
@@ -395,6 +396,7 @@ interface MessageBubbleProps {
   index: number;
   onOpenDocument: (id: string, highlight?: string) => void;
   onToggleSave: (id: string) => void;
+  setCitationRail: (state: CitationRailState | null) => void;
 }
 
 function sourceMeta(documentId: string): { title: string; subtitle: string } {
@@ -414,95 +416,181 @@ function sourceMeta(documentId: string): { title: string; subtitle: string } {
   return { title: 'Source', subtitle: '' };
 }
 
+function toRailQuotes(
+  quotes: Array<{ documentId: string; excerpt: string; relevanceReason: string }>
+): CitationQuoteItem[] {
+  return quotes.map((q) => {
+    const meta = sourceMeta(q.documentId);
+    return {
+      documentId: q.documentId,
+      excerpt: q.excerpt,
+      title: meta.title,
+      subtitle: meta.subtitle,
+      relevanceReason: q.relevanceReason,
+    };
+  });
+}
+
 function MessageBubble({
   message,
   index,
-  onOpenDocument,
   onToggleSave,
+  setCitationRail,
 }: MessageBubbleProps) {
   const [focusedSource, setFocusedSource] = useState<number | null>(null);
   const [resolvedSources, setResolvedSources] = useState<SourceReference[]>(
     () => message.sources ?? []
   );
-  const [quoteModal, setQuoteModal] = useState<QuoteModalState>(quoteModalClosed());
-  const resolvingRef = useRef<Set<number>>(new Set());
+  /** Cache quotes per [n] occurrence so different claims with the same [1] stay distinct. */
+  const quoteCache = useRef<Map<string, CitationQuoteItem[]>>(new Map());
+  const resolvingRef = useRef<Set<string>>(new Set());
+  const answerRef = useRef<HTMLDivElement>(null);
   const { user } = useAuth();
 
   useEffect(() => {
     setResolvedSources(message.sources ?? []);
+    quoteCache.current.clear();
   }, [message.id, message.sources]);
 
   const citationSlots = buildCitationSlots(message.content, resolvedSources);
 
-  async function requestQuote(srcIndex: number) {
-    setFocusedSource(srcIndex);
-    const citationNumber = srcIndex + 1;
-    const existing = citationSlots[srcIndex];
+  async function resolveClaim(opts: {
+    mode: 'citation' | 'selection';
+    label: string;
+    claimText: string;
+    citationNumber?: number;
+    occurrence?: number;
+    knownDocumentId?: string;
+    maxQuotes?: number;
+    cacheKey?: string;
+  }) {
+    const requestId = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const cacheKey = opts.cacheKey;
 
-    // Already have a quote — show it immediately.
-    if (existing?.excerpt?.trim() && existing.documentId) {
-      const meta = sourceMeta(existing.documentId);
-      setQuoteModal({
-        open: true,
-        citationNumber,
-        status: 'ready',
-        title: meta.title,
-        subtitle: meta.subtitle,
-        excerpt: existing.excerpt,
-        documentId: existing.documentId,
+    if (cacheKey) {
+      const cached = quoteCache.current.get(cacheKey);
+      if (cached?.length) {
+        setCitationRail({
+          requestId,
+          mode: opts.mode,
+          label: opts.label,
+          claimText: opts.claimText,
+          status: 'ready',
+          quotes: cached,
+        });
+        return;
+      }
+    }
+
+    if (cacheKey && resolvingRef.current.has(cacheKey)) {
+      setCitationRail({
+        requestId,
+        mode: opts.mode,
+        label: opts.label,
+        claimText: opts.claimText,
+        status: 'loading',
+        quotes: [],
       });
       return;
     }
 
-    if (resolvingRef.current.has(srcIndex)) {
-      setQuoteModal(quoteModalLoading(citationNumber));
-      return;
-    }
+    if (cacheKey) resolvingRef.current.add(cacheKey);
 
-    resolvingRef.current.add(srcIndex);
-    setQuoteModal(quoteModalLoading(citationNumber));
+    setCitationRail({
+      requestId,
+      mode: opts.mode,
+      label: opts.label,
+      claimText: opts.claimText,
+      status: 'loading',
+      quotes: [],
+    });
 
     try {
-      const result = await resolveSourceQuote({
+      const results = await findSupportingQuotes({
+        claimText: opts.claimText,
         answer: message.content,
-        citationNumber,
-        claimContext: claimContextAroundCitation(message.content, citationNumber),
-        knownDocumentId: existing?.documentId || undefined,
+        citationNumber: opts.citationNumber,
+        knownDocumentId: opts.knownDocumentId,
+        maxQuotes: opts.maxQuotes ?? (opts.mode === 'selection' ? 3 : 1),
         uploadedDocs: getUploadedDocs(),
       });
-      const meta = sourceMeta(result.documentId);
-      const next: SourceReference = {
-        documentId: result.documentId,
-        excerpt: result.excerpt,
-        relevanceReason: result.relevanceReason || existing?.relevanceReason || '',
-      };
-      setResolvedSources((prev) => {
-        const copy = [...prev];
-        while (copy.length <= srcIndex) {
-          copy.push({ documentId: '', excerpt: '', relevanceReason: '' });
-        }
-        copy[srcIndex] = next;
-        return copy;
-      });
-      setQuoteModal({
-        open: true,
-        citationNumber,
+      const quotes = toRailQuotes(results);
+      if (cacheKey) quoteCache.current.set(cacheKey, quotes);
+
+      // Keep sources list metadata fresh for the first occurrence of each [n].
+      if (opts.citationNumber != null && (opts.occurrence ?? 0) === 0 && results[0]) {
+        const srcIndex = opts.citationNumber - 1;
+        setResolvedSources((prev) => {
+          const copy = [...prev];
+          while (copy.length <= srcIndex) {
+            copy.push({ documentId: '', excerpt: '', relevanceReason: '' });
+          }
+          copy[srcIndex] = {
+            documentId: results[0].documentId,
+            excerpt: results[0].excerpt,
+            relevanceReason:
+              results[0].relevanceReason || copy[srcIndex]?.relevanceReason || '',
+          };
+          return copy;
+        });
+      }
+
+      setCitationRail({
+        requestId,
+        mode: opts.mode,
+        label: opts.label,
+        claimText: opts.claimText,
         status: 'ready',
-        title: meta.title,
-        subtitle: meta.subtitle,
-        excerpt: result.excerpt,
-        documentId: result.documentId,
+        quotes,
       });
     } catch (err) {
-      setQuoteModal({
-        open: true,
-        citationNumber,
+      setCitationRail({
+        requestId,
+        mode: opts.mode,
+        label: opts.label,
+        claimText: opts.claimText,
         status: 'error',
-        error: err instanceof Error ? err.message : 'Could not resolve this citation.',
+        quotes: [],
+        error: err instanceof Error ? err.message : 'Could not resolve this claim.',
       });
     } finally {
-      resolvingRef.current.delete(srcIndex);
+      if (cacheKey) resolvingRef.current.delete(cacheKey);
     }
+  }
+
+  function requestCitationQuote(citationNumber: number, occurrence: number) {
+    setFocusedSource(citationNumber - 1);
+    const claimText = claimContextAroundCitation(
+      message.content,
+      citationNumber,
+      occurrence
+    );
+    const knownDocumentId = citationSlots[citationNumber - 1]?.documentId || undefined;
+    void resolveClaim({
+      mode: 'citation',
+      label: `[${citationNumber}]`,
+      claimText,
+      citationNumber,
+      occurrence,
+      knownDocumentId,
+      maxQuotes: 1,
+      cacheKey: occurrenceCacheKey(citationNumber, occurrence),
+    });
+  }
+
+  function requestFromSourcesPanel(srcIndex: number) {
+    // Panel rows map to source index; use first occurrence of that [n].
+    requestCitationQuote(srcIndex + 1, 0);
+  }
+
+  function requestFromSelection(selectedText: string) {
+    void resolveClaim({
+      mode: 'selection',
+      label: 'Selection',
+      claimText: selectedText,
+      maxQuotes: 3,
+      cacheKey: `sel:${selectedText.slice(0, 120)}`,
+    });
   }
 
   if (message.role === 'user') {
@@ -536,11 +624,15 @@ function MessageBubble({
           <ThinkingBar label="Searching your sources…" />
         ) : (
           <>
-            <div className="prose-chat chat-answer">
+            <div ref={answerRef} className="prose-chat chat-answer relative">
               <AnswerMarkdown
                 content={message.content}
                 sources={citationSlots}
-                onCitationClick={requestQuote}
+                onCitationClick={requestCitationQuote}
+              />
+              <SelectionFindBar
+                containerRef={answerRef}
+                onFindSources={requestFromSelection}
               />
             </div>
 
@@ -548,7 +640,7 @@ function MessageBubble({
               <SourcesPanel
                 sources={citationSlots}
                 focusIndex={focusedSource}
-                onRequestQuote={requestQuote}
+                onRequestQuote={requestFromSourcesPanel}
               />
             )}
 
@@ -589,12 +681,6 @@ function MessageBubble({
           </>
         )}
       </div>
-
-      <SourceQuoteModal
-        state={quoteModal}
-        onClose={() => setQuoteModal(quoteModalClosed())}
-        onOpenDocument={onOpenDocument}
-      />
     </div>
   );
 }

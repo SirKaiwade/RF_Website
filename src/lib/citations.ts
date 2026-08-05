@@ -60,22 +60,62 @@ export function buildCitationSlots(
   return slots;
 }
 
-/** Grab ~local context around citation [n] so the quote resolver knows the claim. */
+/** Character offset of the Nth (0-based) occurrence of `[citationNumber]`. */
+export function citationOffset(
+  content: string,
+  citationNumber: number,
+  occurrence = 0
+): number {
+  const normalized = normalizeCitationMarkers(content);
+  const marker = `[${citationNumber}]`;
+  let from = 0;
+  let idx = -1;
+  for (let i = 0; i <= occurrence; i++) {
+    idx = normalized.indexOf(marker, from);
+    if (idx < 0) return -1;
+    from = idx + marker.length;
+  }
+  return idx;
+}
+
+/**
+ * Claim text for a specific occurrence of [n]: the 1–3 sentences immediately
+ * preceding that marker (not the first [n] in the answer).
+ */
 export function claimContextAroundCitation(
   content: string,
   citationNumber: number,
-  radius = 220
+  occurrence = 0
 ): string {
   const normalized = normalizeCitationMarkers(content);
   const marker = `[${citationNumber}]`;
-  const idx = normalized.indexOf(marker);
+  const idx = citationOffset(normalized, citationNumber, occurrence);
   if (idx < 0) {
-    return normalized.slice(0, Math.min(normalized.length, radius * 2));
+    return normalized.slice(0, Math.min(normalized.length, 400));
   }
-  const start = Math.max(0, idx - radius);
-  const end = Math.min(normalized.length, idx + marker.length + radius);
-  let slice = normalized.slice(start, end).replace(/\s+/g, ' ').trim();
-  if (start > 0) slice = '…' + slice;
-  if (end < normalized.length) slice = slice + '…';
-  return slice;
+
+  const before = normalized.slice(0, idx).replace(/\s+/g, ' ').trim();
+  if (!before) {
+    const after = normalized
+      .slice(idx + marker.length, idx + marker.length + 220)
+      .replace(/\s+/g, ' ')
+      .trim();
+    return after;
+  }
+
+  // Prefer sentence boundaries; fall back to a trailing window.
+  const parts = before.split(/(?<=[.!?…])\s+/).filter(Boolean);
+  const claim = (parts.length ? parts.slice(-3) : [before.slice(-280)])
+    .join(' ')
+    .trim();
+
+  // Strip trailing citation markers left from earlier cites in the same sentence.
+  return claim.replace(/\s*\[\d+\]\s*$/g, '').trim() || before.slice(-280);
+}
+
+export function occurrenceCacheKey(
+  citationNumber: number,
+  occurrence: number
+): string {
+  return `${citationNumber}:${occurrence}`;
 }

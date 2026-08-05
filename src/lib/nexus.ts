@@ -368,27 +368,38 @@ export async function askNexus(
 }
 
 const QUOTE_TOOL: Anthropic.Tool = {
-  name: 'source_quote',
+  name: 'source_quotes',
   description:
-    'Return a verbatim quote from the corpus that supports a specific cited claim.',
+    'Return one or more verbatim corpus quotes that support a specific claim.',
   input_schema: {
     type: 'object',
     properties: {
-      documentId: {
-        type: 'string',
-        description: 'Exact corpus id of the document/event/publication/upload that supports the claim.',
-      },
-      excerpt: {
-        type: 'string',
-        description:
-          'Verbatim contiguous quote (1–3 sentences) copied character-for-character from that source. No paraphrasing, no ellipses inside the quote.',
-      },
-      relevanceReason: {
-        type: 'string',
-        description: 'One short clause on why this quote supports the claim.',
+      quotes: {
+        type: 'array',
+        description: '1–3 supporting quotes, strongest first.',
+        items: {
+          type: 'object',
+          properties: {
+            documentId: {
+              type: 'string',
+              description:
+                'Exact corpus id of the document/event/publication/upload.',
+            },
+            excerpt: {
+              type: 'string',
+              description:
+                'Verbatim contiguous quote (1–3 sentences) copied character-for-character from that source. No paraphrasing, no ellipses inside the quote.',
+            },
+            relevanceReason: {
+              type: 'string',
+              description: 'One short clause on why this quote supports the claim.',
+            },
+          },
+          required: ['documentId', 'excerpt', 'relevanceReason'],
+        },
       },
     },
-    required: ['documentId', 'excerpt', 'relevanceReason'],
+    required: ['quotes'],
   },
 };
 
@@ -398,58 +409,90 @@ export interface ResolvedSourceQuote {
   relevanceReason: string;
 }
 
+function isKnownDocId(
+  documentId: string,
+  uploadedDocs: UploadedDoc[]
+): boolean {
+  if (seedDocIds.has(documentId)) return true;
+  if (uploadedDocs.some((u) => u.id === documentId)) return true;
+  if (eventsStore.get().some((e) => e.id === documentId)) return true;
+  if (publicationsStore.get().some((p) => p.id === documentId)) return true;
+  return false;
+}
+
 /**
- * On-demand: given an answer and a citation index, ask the model for a
- * verbatim supporting quote from the corpus. Used when the user clicks [n].
+ * Find exact supporting quotes for a claim (citation click or text selection).
+ * Prompt focuses on the claim sentences, not the whole answer.
  */
-export async function resolveSourceQuote(params: {
-  answer: string;
-  citationNumber: number;
-  claimContext: string;
+export async function findSupportingQuotes(params: {
+  claimText: string;
+  /** Optional full answer for light context only. */
+  answer?: string;
+  citationNumber?: number;
   knownDocumentId?: string;
+  maxQuotes?: number;
   uploadedDocs?: UploadedDoc[];
   pinnedDocIds?: string[];
-}): Promise<ResolvedSourceQuote> {
+}): Promise<ResolvedSourceQuote[]> {
   const useEdgeFunction = supabaseConfigured();
   if (!client && !useEdgeFunction) {
     throw new Error('Nexus is not connected to a model.');
   }
 
+  const claim = params.claimText.trim();
+  if (!claim) {
+    throw new Error('No claim text to ground.');
+  }
+
   const uploadedDocs = params.uploadedDocs ?? [];
+  const maxQuotes = Math.min(Math.max(params.maxQuotes ?? 1, 1), 3);
   const { retrieved, catalog, totalLibraryDocs } = retrieveLibraryDocs(
-    params.claimContext || params.answer.slice(0, 400),
+    claim,
     uploadedDocs,
-    { pinnedDocIds: params.pinnedDocIds }
+    {
+      pinnedDocIds: [
+        ...(params.pinnedDocIds ?? []),
+        ...(params.knownDocumentId ? [params.knownDocumentId] : []),
+      ],
+    }
   );
 
-  const hint = params.knownDocumentId
-    ? `Preferred document id (use if it still fits): ${params.knownDocumentId}`
-    : 'No preferred document id — pick the best matching corpus entry.';
+  const citeHint =
+    params.citationNumber != null
+      ? `This claim sits next to inline citation [${params.citationNumber}] in the answer.`
+      : 'This claim was highlighted by the user in the answer.';
 
-  const userPrompt = `The assistant answered a user question with inline citation [${params.citationNumber}].
+  const preferred = params.knownDocumentId
+    ? `Preferred document id when it fits: ${params.knownDocumentId}. Still pick a different passage if this claim needs a different excerpt from that same file.`
+    : 'Pick the best matching corpus entry for THIS claim.';
 
-Full answer:
+  const answerBlock = params.answer?.trim()
+    ? `\nFull answer (context only — ground the CLAIM, not the whole answer):\n"""\n${params.answer.slice(0, 2500)}\n"""\n`
+    : '';
+
+  const userPrompt = `Find exact quotes in quotation marks to support the following claim.
+
+CLAIM TO SUPPORT:
 """
-${params.answer}
+${claim}
 """
 
-Claim / surrounding text near [${params.citationNumber}]:
-"""
-${params.claimContext}
-"""
-
-${hint}
-
-Find the single best supporting passage in the corpus for that claim. Return it via the source_quote tool as a verbatim quote (1–3 sentences, character-for-character from the source text).`;
+${citeHint}
+${preferred}
+${answerBlock}
+Return ${maxQuotes === 1 ? 'exactly 1' : `up to ${maxQuotes}`} verbatim quote(s) via the source_quotes tool.
+Each excerpt must be copied character-for-character from the corpus (1–3 sentences). No paraphrase.
+Different claims in the same document need different excerpts — match the CLAIM above, not a generic source summary.`;
 
   const payload: Anthropic.MessageCreateParamsNonStreaming = {
     model: MODEL,
-    max_tokens: 800,
+    max_tokens: 1200,
     system: `${buildSystemPrompt(retrieved, catalog, totalLibraryDocs)}
 
-You are now resolving ONE citation on demand. Call the source_quote tool exactly once. The excerpt MUST be a verbatim contiguous quote from the corpus — no paraphrase.`,
+You resolve supporting quotes on demand. Call source_quotes exactly once.
+Ground ONLY the claim the user provided. Prefer passages that specifically back that claim's wording and facts.`,
     tools: [QUOTE_TOOL],
-    tool_choice: { type: 'tool', name: 'source_quote' },
+    tool_choice: { type: 'tool', name: 'source_quotes' },
     messages: [{ role: 'user', content: userPrompt }],
   };
 
@@ -461,33 +504,53 @@ You are now resolving ONE citation on demand. Call the source_quote tool exactly
     (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use'
   );
   if (!toolUse) {
-    throw new Error('Nexus did not return a source quote.');
+    throw new Error('Nexus did not return source quotes.');
   }
 
   const raw = toolUse.input as {
-    documentId: string;
-    excerpt: string;
-    relevanceReason: string;
+    quotes?: Array<{ documentId: string; excerpt: string; relevanceReason: string }>;
   };
 
-  const uploadedDocIds = new Set(uploadedDocs.map((u) => u.id));
-  const eventIds = new Set(eventsStore.get().map((e) => e.id));
-  const publicationIds = new Set(publicationsStore.get().map((p) => p.id));
-  const ok =
-    seedDocIds.has(raw.documentId) ||
-    uploadedDocIds.has(raw.documentId) ||
-    eventIds.has(raw.documentId) ||
-    publicationIds.has(raw.documentId);
+  const quotes = (raw.quotes ?? [])
+    .filter(
+      (q) =>
+        q?.excerpt?.trim() &&
+        q.documentId &&
+        isKnownDocId(q.documentId, uploadedDocs)
+    )
+    .map((q) => ({
+      documentId: q.documentId,
+      excerpt: q.excerpt.trim(),
+      relevanceReason: q.relevanceReason?.trim() ?? '',
+    }))
+    .slice(0, maxQuotes);
 
-  if (!ok || !raw.excerpt?.trim()) {
-    throw new Error('Could not locate a verifiable quote for this citation.');
+  if (quotes.length === 0) {
+    throw new Error('Could not locate a verifiable quote for this claim.');
   }
 
-  return {
-    documentId: raw.documentId,
-    excerpt: raw.excerpt.trim(),
-    relevanceReason: raw.relevanceReason?.trim() ?? '',
-  };
+  return quotes;
+}
+
+/** @deprecated Prefer findSupportingQuotes — kept for call-site compatibility. */
+export async function resolveSourceQuote(params: {
+  answer: string;
+  citationNumber: number;
+  claimContext: string;
+  knownDocumentId?: string;
+  uploadedDocs?: UploadedDoc[];
+  pinnedDocIds?: string[];
+}): Promise<ResolvedSourceQuote> {
+  const [first] = await findSupportingQuotes({
+    claimText: params.claimContext,
+    answer: params.answer,
+    citationNumber: params.citationNumber,
+    knownDocumentId: params.knownDocumentId,
+    maxQuotes: 1,
+    uploadedDocs: params.uploadedDocs,
+    pinnedDocIds: params.pinnedDocIds,
+  });
+  return first;
 }
 
 function clamp01(n: number): number {

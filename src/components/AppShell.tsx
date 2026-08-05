@@ -3,6 +3,7 @@ import { Outlet } from 'react-router-dom';
 import { Menu } from 'lucide-react';
 import ConversationsSidebar from './ConversationsSidebar';
 import DocumentViewer from './DocumentViewer';
+import CitationRail, { type CitationRailState } from './CitationRail';
 import BrandMark from './BrandMark';
 import { useConversations } from '../lib/conversations';
 import { initLocalDataSync } from '../lib/localDataSync';
@@ -24,6 +25,9 @@ export interface ShellContext {
   openDocId: string | null;
   openDocument: (id: string, highlight?: string) => void;
   closeDocument: () => void;
+  citationRail: CitationRailState | null;
+  setCitationRail: (state: CitationRailState | null) => void;
+  closeCitationRail: () => void;
 }
 
 export default function AppShell() {
@@ -34,6 +38,7 @@ export default function AppShell() {
   // Bumped on every open call so the viewer re-scrolls even when the user
   // clicks the same citation twice.
   const [highlightToken, setHighlightToken] = useState(0);
+  const [citationRail, setCitationRail] = useState<CitationRailState | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
@@ -81,7 +86,12 @@ export default function AppShell() {
     };
   }, [user?.email]);
 
+  const closeCitationRail = useCallback(() => {
+    setCitationRail(null);
+  }, []);
+
   const openDocument = useCallback((id: string, highlightText?: string) => {
+    setCitationRail(null);
     setOpenDocId(id);
     setHighlight(highlightText ?? null);
     if (highlightText) {
@@ -96,21 +106,30 @@ export default function AppShell() {
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape' && openDocId) {
+      if (e.key !== 'Escape') return;
+      if (openDocId) {
         setOpenDocId(null);
         setHighlight(null);
+        return;
       }
+      if (citationRail) setCitationRail(null);
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [openDocId]);
+  }, [openDocId, citationRail]);
 
   const ctx: ShellContext = {
     ...conv,
     openDocId,
     openDocument,
     closeDocument,
+    citationRail,
+    setCitationRail,
+    closeCitationRail,
   };
+
+  const showDoc = Boolean(openDocId);
+  const showRail = Boolean(citationRail) && !showDoc;
 
   return (
     <div className="h-screen flex flex-col bg-surface text-ink overflow-hidden">
@@ -144,8 +163,15 @@ export default function AppShell() {
           onCloseMobile={() => setMobileNavOpen(false)}
         />
         <Outlet context={ctx} />
+        {showRail && (
+          <CitationRail
+            state={citationRail}
+            onClose={closeCitationRail}
+            onOpenDocument={openDocument}
+          />
+        )}
         <DocumentViewer
-          documentId={openDocId}
+          documentId={showDoc ? openDocId : null}
           highlight={highlight}
           highlightToken={highlightToken}
           onClose={closeDocument}

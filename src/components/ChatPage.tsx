@@ -11,6 +11,7 @@ export default function ChatPage() {
       onOpenDocument={ctx.openDocument}
       onToggleSave={ctx.toggleSave}
       openDocId={ctx.openDocId}
+      setCitationRail={ctx.setCitationRail}
     />
   );
 }

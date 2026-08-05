@@ -15,18 +15,24 @@ export interface InlineSource {
 interface Props {
   content: string;
   sources: InlineSource[];
-  /** Inline [n] chips — parent opens quote resolver / sources panel. */
-  onCitationClick: (index: number) => void;
+  /** citationNumber is 1-based; occurrence is 0-based among matching [n] markers. */
+  onCitationClick: (citationNumber: number, occurrence: number) => void;
 }
 
 const CITE_PREFIX = '#nexus-cite-';
 
-/** Turn [1] citation markers into interceptable pseudo-links (not real markdown links). */
+/**
+ * Turn [1] markers into links that encode occurrence:
+ * first [1] → #nexus-cite-1.0, second [1] → #nexus-cite-1.1, …
+ */
 function preprocessCitations(text: string): string {
-  return normalizeCitationMarkers(text).replace(
-    /\[(\d+)\](?!\()/g,
-    `[$1](${CITE_PREFIX}$1)`
-  );
+  const counts = new Map<number, number>();
+  return normalizeCitationMarkers(text).replace(/\[(\d+)\](?!\()/g, (_m, nStr: string) => {
+    const n = parseInt(nStr, 10);
+    const occ = counts.get(n) ?? 0;
+    counts.set(n, occ + 1);
+    return `[${n}](${CITE_PREFIX}${n}.${occ})`;
+  });
 }
 
 function docTitle(documentId: string): string {
@@ -65,8 +71,12 @@ export default function AnswerMarkdown({ content, sources, onCitationClick }: Pr
   const components: Components = {
     a: ({ href, children }) => {
       if (href?.startsWith(CITE_PREFIX)) {
-        const n = parseInt(href.slice(CITE_PREFIX.length), 10);
+        const payload = href.slice(CITE_PREFIX.length);
+        const [nStr, occStr] = payload.split('.');
+        const n = parseInt(nStr, 10);
+        const occ = parseInt(occStr ?? '0', 10);
         if (!Number.isFinite(n) || n < 1) return <span>{children}</span>;
+        const occurrence = Number.isFinite(occ) && occ >= 0 ? occ : 0;
         const src = sources[n - 1];
         const title = src?.documentId
           ? docTitle(src.documentId)
@@ -74,8 +84,8 @@ export default function AnswerMarkdown({ content, sources, onCitationClick }: Pr
         return (
           <button
             type="button"
-            onClick={() => onCitationClick(n - 1)}
-            title={`Show source ${n}${src?.documentId ? `: ${title}` : ''}`}
+            onClick={() => onCitationClick(n, occurrence)}
+            title={`Ground citation ${n} from surrounding claim${src?.documentId ? ` · ${title}` : ''}`}
             className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 mx-0.5 -mt-0.5 align-middle rounded-sm bg-un-blue-bg text-un-blue text-[10px] font-bold font-mono hover:bg-un-blue hover:text-white transition-colors"
           >
             {n}
