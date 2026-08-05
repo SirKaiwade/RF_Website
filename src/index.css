@@ -1713,7 +1713,11 @@
 .chat-verify-warn {
   margin: 0;
   font-size: 11px;
-  color: #9a6700;
+  color: #7A5A00;
+  background: #FEF3CD;
+  border: 1px solid #F5E6A8;
+  border-radius: 2px;
+  padding: 6px 8px;
 }
 
 /* On-demand citation quote modal */
@@ -1840,13 +1844,6 @@
   padding: 12px 16px 14px;
   border-top: 1px solid rgb(var(--rule));
   background: rgb(var(--surface-subtle) / 0.4);
-}
-  font-size: 11px;
-  color: #7A5A00;
-  background: #FEF3CD;
-  border: 1px solid #F5E6A8;
-  border-radius: 2px;
-  padding: 6px 8px;
 }
 
 .scrollbar-none {
