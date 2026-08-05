@@ -18,7 +18,7 @@ export interface ShellContext {
   activeId: string | null;
   startNew: () => void;
   openConversation: (id: string) => void;
-  sendMessage: (text: string) => void;
+  sendMessage: (text: string, options?: { pinnedDocIds?: string[] }) => void;
   toggleSave: (messageId: string) => void;
   deleteConversation: (id: string) => void;
   openDocId: string | null;

@@ -3,6 +3,9 @@ import remarkGfm from 'remark-gfm';
 import { Link } from 'react-router-dom';
 import { getDocument } from '../data/documents';
 import { getUploadedDocs } from '../lib/uploads';
+import { getEvent } from '../data/events';
+import { getPublication } from '../data/publications';
+import { normalizeCitationMarkers } from '../lib/citations';
 
 export interface InlineSource {
   documentId: string;
@@ -12,7 +15,7 @@ export interface InlineSource {
 interface Props {
   content: string;
   sources: InlineSource[];
-  /** Inline [n] chips — parent opens the document viewer and may expand sources. */
+  /** Inline [n] chips — parent opens quote resolver / sources panel. */
   onCitationClick: (index: number) => void;
 }
 
@@ -20,12 +23,20 @@ const CITE_PREFIX = '#nexus-cite-';
 
 /** Turn [1] citation markers into interceptable pseudo-links (not real markdown links). */
 function preprocessCitations(text: string): string {
-  return text.replace(/\[(\d+)\](?!\()/g, `[$1](${CITE_PREFIX}$1)`);
+  return normalizeCitationMarkers(text).replace(
+    /\[(\d+)\](?!\()/g,
+    `[$1](${CITE_PREFIX}$1)`
+  );
 }
 
 function docTitle(documentId: string): string {
+  if (!documentId) return 'Source';
   const seed = getDocument(documentId);
   if (seed) return seed.title;
+  const event = getEvent(documentId);
+  if (event) return event.title;
+  const pub = getPublication(documentId);
+  if (pub) return pub.title;
   const uploaded = getUploadedDocs().find((d) => d.id === documentId);
   return uploaded?.filename ?? 'Source';
 }
@@ -55,14 +66,16 @@ export default function AnswerMarkdown({ content, sources, onCitationClick }: Pr
     a: ({ href, children }) => {
       if (href?.startsWith(CITE_PREFIX)) {
         const n = parseInt(href.slice(CITE_PREFIX.length), 10);
+        if (!Number.isFinite(n) || n < 1) return <span>{children}</span>;
         const src = sources[n - 1];
-        if (!src) return <span>{children}</span>;
-        const title = docTitle(src.documentId);
+        const title = src?.documentId
+          ? docTitle(src.documentId)
+          : `Source ${n}`;
         return (
           <button
             type="button"
             onClick={() => onCitationClick(n - 1)}
-            title={`Source ${n}: ${title} — find in document`}
+            title={`Show source ${n}${src?.documentId ? `: ${title}` : ''}`}
             className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 mx-0.5 -mt-0.5 align-middle rounded-sm bg-un-blue-bg text-un-blue text-[10px] font-bold font-mono hover:bg-un-blue hover:text-white transition-colors"
           >
             {n}

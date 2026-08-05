@@ -66,7 +66,7 @@ export function useConversations() {
   }, []);
 
   const sendMessage = useCallback(
-    (text: string) => {
+    (text: string, options?: { pinnedDocIds?: string[] }) => {
       const trimmed = text.trim();
       if (!trimmed) return;
 
@@ -87,6 +87,7 @@ export function useConversations() {
 
       let priorMessages: ChatMessage[] = [];
       let resolvedConvId: string;
+      const pinnedDocIds = options?.pinnedDocIds ?? [];
 
       setConversations((prev) => {
         let conv = activeId ? prev.find((c) => c.id === activeId) : null;
@@ -127,7 +128,9 @@ export function useConversations() {
 
       (async () => {
         try {
-          const result = await askNexus(trimmed, priorMessages, getUploadedDocs());
+          const result = await askNexus(trimmed, priorMessages, getUploadedDocs(), {
+            pinnedDocIds,
+          });
           if (aborter.signal.aborted) return;
           const completedAt = new Date().toISOString();
 

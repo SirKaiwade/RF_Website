@@ -183,6 +183,7 @@ export interface Publication {
 
 export interface SourceReference {
   documentId: string;
+  /** Verbatim quote — may be empty until the user asks Nexus to produce it. */
   excerpt: string;
   relevanceReason: string;
 }

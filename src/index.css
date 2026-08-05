@@ -1713,6 +1713,135 @@
 .chat-verify-warn {
   margin: 0;
   font-size: 11px;
+  color: #9a6700;
+}
+
+/* On-demand citation quote modal */
+.cite-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(15 23 42 / 0.42);
+  backdrop-filter: blur(2px);
+  animation: fade-in 120ms ease;
+}
+
+.cite-modal {
+  width: min(520px, 100%);
+  max-height: min(70vh, 560px);
+  display: flex;
+  flex-direction: column;
+  background: rgb(var(--surface));
+  border: 1px solid rgb(var(--rule));
+  border-radius: 4px;
+  box-shadow: 0 18px 48px rgb(15 23 42 / 0.18);
+  overflow: hidden;
+  animation: fade-up 160ms ease;
+}
+
+.cite-modal-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid rgb(var(--rule));
+  background: rgb(var(--surface-subtle) / 0.65);
+}
+
+.cite-modal-kicker {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--un-blue);
+  font-family: 'IBM Plex Mono', Menlo, monospace;
+}
+
+.cite-modal-title {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: rgb(var(--ink));
+  letter-spacing: -0.01em;
+}
+
+.cite-modal-sub {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: rgb(var(--ink-muted));
+}
+
+.cite-modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 2px;
+  color: rgb(var(--ink-muted));
+  flex-shrink: 0;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.cite-modal-close:hover {
+  background: rgb(var(--rule) / 0.55);
+  color: rgb(var(--ink));
+}
+
+.cite-modal-body {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.cite-modal-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 28px 12px;
+  text-align: center;
+  color: rgb(var(--ink-muted));
+  font-size: 13px;
+}
+
+.cite-modal-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 2px;
+  background: #fff8e8;
+  color: #9a6700;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.cite-modal-quote {
+  margin: 0;
+  padding: 0;
+  border: none;
+  font-size: 15px;
+  line-height: 1.65;
+  color: rgb(var(--ink));
+  font-style: italic;
+  font-family: Georgia, 'Times New Roman', serif;
+}
+
+.cite-modal-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px 14px;
+  border-top: 1px solid rgb(var(--rule));
+  background: rgb(var(--surface-subtle) / 0.4);
+}
+  font-size: 11px;
   color: #7A5A00;
   background: #FEF3CD;
   border: 1px solid #F5E6A8;

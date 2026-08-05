@@ -1,17 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, Paperclip, Loader2 } from 'lucide-react';
-import { ingestFile, persistDocToCloud } from '../lib/uploads';
+import { ingestFile, persistDocToCloud, type UploadedDoc } from '../lib/uploads';
 import { useAuth } from '../lib/auth';
 import { supabaseConfigured } from '../lib/supabase';
 import { classNames } from '../lib/format';
 
 interface Props {
   onSend: (text: string) => void;
+  onAttached?: (docs: UploadedDoc[]) => void;
   placeholder?: string;
   autoFocus?: boolean;
 }
 
-export default function Composer({ onSend, placeholder, autoFocus = true }: Props) {
+export default function Composer({
+  onSend,
+  onAttached,
+  placeholder,
+  autoFocus = true,
+}: Props) {
   const { user } = useAuth();
   const [value, setValue] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -43,6 +49,7 @@ export default function Composer({ onSend, placeholder, autoFocus = true }: Prop
     setUploading(true);
     setUploadError(null);
     const errors: string[] = [];
+    const attached: UploadedDoc[] = [];
     const cloud = supabaseConfigured();
     for (const file of Array.from(files)) {
       const result = await ingestFile(file);
@@ -50,11 +57,15 @@ export default function Composer({ onSend, placeholder, autoFocus = true }: Prop
         errors.push(result.error);
         continue;
       }
-      if (result.doc && cloud && user?.email) {
-        const saved = await persistDocToCloud(result.doc, user.email);
-        if (!saved.ok && saved.error) errors.push(saved.error);
+      if (result.doc) {
+        attached.push(result.doc);
+        if (cloud && user?.email) {
+          const saved = await persistDocToCloud(result.doc, user.email);
+          if (!saved.ok && saved.error) errors.push(saved.error);
+        }
       }
     }
+    if (attached.length) onAttached?.(attached);
     setUploading(false);
     if (errors.length) setUploadError(errors[0]);
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -105,7 +116,7 @@ export default function Composer({ onSend, placeholder, autoFocus = true }: Prop
             onClick={() => fileInputRef.current?.click()}
             disabled={uploading}
             aria-label="Attach a document"
-            title="Attach a file to the knowledge library"
+            title="Attach a file to this chat"
             className="w-9 h-9 rounded-full text-gray-400 hover:text-un-blue hover:bg-un-blue-bg flex items-center justify-center disabled:opacity-50 transition-colors"
           >
             {uploading ? (

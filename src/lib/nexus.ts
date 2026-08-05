@@ -181,9 +181,9 @@ Rules:
 - Ground every claim in the corpus. Never invent facts, dates, names, or findings.
 - If the corpus does not contain enough to answer confidently, call the "answer" tool with noAnswer=true and explain in the answer field what is missing and the closest adjacent material.
 - Cite every claim inline using [1], [2], [3] markers. The number maps to the position in the sources array (1-indexed).
-- For EVERY source you cite, the "excerpt" field MUST be a verbatim, contiguous quote copied character-for-character from that document's text — no paraphrasing, no ellipses inside the quote, no summarising. Pick the single sentence or sentence fragment that most directly supports the claim. 1–3 sentences max. The UI will use this exact string to highlight the passage in the source — if the quote is paraphrased it will fail to highlight and the user will see a warning.
-- If you cannot find a verbatim sentence that supports a claim, do not cite it; either drop the claim or set noAnswer=true.
-- Location questions ("where do I find…", "which folder has…", "where are the numbers for…"): lead with the document's breadcrumb in "Folder > Subfolder > file" form from the library catalog (or retrieved doc) and a markdown hyperlink to /library?path=…&file=…. Example: "You can find it at **Finance > 2024 > Q1 > [budget.xlsx](/library?path=Finance/2024/Q1&file=up-abc).**" Still include a normal [n] citation with a verbatim excerpt when the body was retrieved.
+- Keep the sources array COMPACT — for each [n] include only documentId and a short relevanceReason (one clause). Do NOT put long excerpts in the sources array; the UI fetches verbatim quotes on demand when the user clicks a citation. This keeps long answers reliable.
+- Cap at 12 sources. Prefer the strongest supporting documents over exhaustive citation.
+- Location questions ("where do I find…", "which folder has…", "where are the numbers for…"): lead with the document's breadcrumb in "Folder > Subfolder > file" form from the library catalog (or retrieved doc) and a markdown hyperlink to /library?path=…&file=…. Example: "You can find it at **Finance > 2024 > Q1 > [budget.xlsx](/library?path=Finance/2024/Q1&file=up-abc).**" Still include a normal [n] citation.
 - Use **bold** sparingly for key entities, project names, and findings.
 - Order sources by importance to the answer.
 - For roll-up questions across the events matrix or publications database (counts, upcoming events, who leads what, reach numbers), synthesise across entries and cite the most relevant individual entries — at most 6 sources. State plainly when many entries have missing fields (e.g. participant counts not yet reported).
@@ -215,26 +215,26 @@ const ANSWER_TOOL: Anthropic.Tool = {
       sources: {
         type: 'array',
         description:
-          'Sources cited inline by [n]. Order matches inline citation numbers.',
+          'Compact source list matching inline [n] markers. documentId + short relevanceReason only — no long excerpts.',
         items: {
           type: 'object',
           properties: {
             documentId: {
               type: 'string',
-              description: 'Must exactly match a doc id from the corpus.',
-            },
-            excerpt: {
-              type: 'string',
-              description:
-                'Verbatim, contiguous quote copied character-for-character from the source document — 1–3 sentences. Must appear in the document text exactly as written. The UI uses this string to highlight the passage in the source viewer.',
+              description: 'Must exactly match a doc/event/publication/upload id from the corpus.',
             },
             relevanceReason: {
               type: 'string',
               description:
                 'One short clause explaining why this source is relevant to the question.',
             },
+            excerpt: {
+              type: 'string',
+              description:
+                'Optional. Prefer omitting — the UI fetches verbatim quotes on demand.',
+            },
           },
-          required: ['documentId', 'excerpt', 'relevanceReason'],
+          required: ['documentId', 'relevanceReason'],
         },
       },
       relatedPeopleIds: {
@@ -275,7 +275,8 @@ function historyToMessages(history: ChatMessage[]): Anthropic.MessageParam[] {
 export async function askNexus(
   question: string,
   history: ChatMessage[] = [],
-  uploadedDocs: UploadedDoc[] = []
+  uploadedDocs: UploadedDoc[] = [],
+  options?: { pinnedDocIds?: string[] }
 ): Promise<NexusResult> {
   const useEdgeFunction = supabaseConfigured();
   if (!client && !useEdgeFunction) {
@@ -291,7 +292,8 @@ export async function askNexus(
 
   const { retrieved, catalog, totalLibraryDocs } = retrieveLibraryDocs(
     question,
-    uploadedDocs
+    uploadedDocs,
+    { pinnedDocIds: options?.pinnedDocIds }
   );
 
   const messages: Anthropic.MessageParam[] = [
@@ -301,7 +303,7 @@ export async function askNexus(
 
   const payload: Anthropic.MessageCreateParamsNonStreaming = {
     model: MODEL,
-    max_tokens: 2000,
+    max_tokens: 4096,
     system: buildSystemPrompt(retrieved, catalog, totalLibraryDocs),
     tools: [ANSWER_TOOL],
     tool_choice: { type: 'tool', name: 'answer' },
@@ -323,7 +325,7 @@ export async function askNexus(
   const raw = toolUse.input as {
     answer: string;
     confidence?: number;
-    sources: Array<{ documentId: string; excerpt: string; relevanceReason: string }>;
+    sources: Array<{ documentId: string; excerpt?: string; relevanceReason: string }>;
     relatedPeopleIds?: string[];
     followUps?: string[];
     noAnswer?: boolean;
@@ -333,13 +335,19 @@ export async function askNexus(
   const eventIds = new Set(eventsStore.get().map((e) => e.id));
   const publicationIds = new Set(publicationsStore.get().map((p) => p.id));
   // Filter to known ids so the UI never tries to render a phantom source.
-  const sources = (raw.sources ?? []).filter(
-    (s) =>
-      seedDocIds.has(s.documentId) ||
-      uploadedDocIds.has(s.documentId) ||
-      eventIds.has(s.documentId) ||
-      publicationIds.has(s.documentId)
-  );
+  const sources = (raw.sources ?? [])
+    .filter(
+      (s) =>
+        seedDocIds.has(s.documentId) ||
+        uploadedDocIds.has(s.documentId) ||
+        eventIds.has(s.documentId) ||
+        publicationIds.has(s.documentId)
+    )
+    .map((s) => ({
+      documentId: s.documentId,
+      excerpt: typeof s.excerpt === 'string' ? s.excerpt : '',
+      relevanceReason: s.relevanceReason ?? '',
+    }));
   const relatedPeopleIds = (raw.relatedPeopleIds ?? []).filter((id) =>
     validPeopleIds().has(id)
   );
@@ -356,6 +364,129 @@ export async function askNexus(
     followUps: (raw.followUps ?? []).slice(0, 3),
     relatedPeopleIds,
     noAnswer: Boolean(raw.noAnswer),
+  };
+}
+
+const QUOTE_TOOL: Anthropic.Tool = {
+  name: 'source_quote',
+  description:
+    'Return a verbatim quote from the corpus that supports a specific cited claim.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      documentId: {
+        type: 'string',
+        description: 'Exact corpus id of the document/event/publication/upload that supports the claim.',
+      },
+      excerpt: {
+        type: 'string',
+        description:
+          'Verbatim contiguous quote (1–3 sentences) copied character-for-character from that source. No paraphrasing, no ellipses inside the quote.',
+      },
+      relevanceReason: {
+        type: 'string',
+        description: 'One short clause on why this quote supports the claim.',
+      },
+    },
+    required: ['documentId', 'excerpt', 'relevanceReason'],
+  },
+};
+
+export interface ResolvedSourceQuote {
+  documentId: string;
+  excerpt: string;
+  relevanceReason: string;
+}
+
+/**
+ * On-demand: given an answer and a citation index, ask the model for a
+ * verbatim supporting quote from the corpus. Used when the user clicks [n].
+ */
+export async function resolveSourceQuote(params: {
+  answer: string;
+  citationNumber: number;
+  claimContext: string;
+  knownDocumentId?: string;
+  uploadedDocs?: UploadedDoc[];
+  pinnedDocIds?: string[];
+}): Promise<ResolvedSourceQuote> {
+  const useEdgeFunction = supabaseConfigured();
+  if (!client && !useEdgeFunction) {
+    throw new Error('Nexus is not connected to a model.');
+  }
+
+  const uploadedDocs = params.uploadedDocs ?? [];
+  const { retrieved, catalog, totalLibraryDocs } = retrieveLibraryDocs(
+    params.claimContext || params.answer.slice(0, 400),
+    uploadedDocs,
+    { pinnedDocIds: params.pinnedDocIds }
+  );
+
+  const hint = params.knownDocumentId
+    ? `Preferred document id (use if it still fits): ${params.knownDocumentId}`
+    : 'No preferred document id — pick the best matching corpus entry.';
+
+  const userPrompt = `The assistant answered a user question with inline citation [${params.citationNumber}].
+
+Full answer:
+"""
+${params.answer}
+"""
+
+Claim / surrounding text near [${params.citationNumber}]:
+"""
+${params.claimContext}
+"""
+
+${hint}
+
+Find the single best supporting passage in the corpus for that claim. Return it via the source_quote tool as a verbatim quote (1–3 sentences, character-for-character from the source text).`;
+
+  const payload: Anthropic.MessageCreateParamsNonStreaming = {
+    model: MODEL,
+    max_tokens: 800,
+    system: `${buildSystemPrompt(retrieved, catalog, totalLibraryDocs)}
+
+You are now resolving ONE citation on demand. Call the source_quote tool exactly once. The excerpt MUST be a verbatim contiguous quote from the corpus — no paraphrase.`,
+    tools: [QUOTE_TOOL],
+    tool_choice: { type: 'tool', name: 'source_quote' },
+    messages: [{ role: 'user', content: userPrompt }],
+  };
+
+  const response = useEdgeFunction
+    ? await callViaEdgeFunction(payload)
+    : await client!.messages.create(payload);
+
+  const toolUse = response.content.find(
+    (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use'
+  );
+  if (!toolUse) {
+    throw new Error('Nexus did not return a source quote.');
+  }
+
+  const raw = toolUse.input as {
+    documentId: string;
+    excerpt: string;
+    relevanceReason: string;
+  };
+
+  const uploadedDocIds = new Set(uploadedDocs.map((u) => u.id));
+  const eventIds = new Set(eventsStore.get().map((e) => e.id));
+  const publicationIds = new Set(publicationsStore.get().map((p) => p.id));
+  const ok =
+    seedDocIds.has(raw.documentId) ||
+    uploadedDocIds.has(raw.documentId) ||
+    eventIds.has(raw.documentId) ||
+    publicationIds.has(raw.documentId);
+
+  if (!ok || !raw.excerpt?.trim()) {
+    throw new Error('Could not locate a verifiable quote for this citation.');
+  }
+
+  return {
+    documentId: raw.documentId,
+    excerpt: raw.excerpt.trim(),
+    relevanceReason: raw.relevanceReason?.trim() ?? '',
   };
 }
 

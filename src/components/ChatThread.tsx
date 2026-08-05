@@ -21,8 +21,8 @@ import { useAuth } from '../lib/auth';
 import {
   ingestFiles,
   persistDocToCloud,
-  removeUploadedDoc,
   useUploadedDocs,
+  getUploadedDocs,
   type UploadedDoc,
 } from '../lib/uploads';
 import { filesFromDataTransfer } from '../lib/folderDrop';
@@ -30,10 +30,25 @@ import { supabaseConfigured } from '../lib/supabase';
 import Composer from './Composer';
 import AnswerMarkdown from './AnswerMarkdown';
 import SourcesPanel from './SourcesPanel';
+import SourceQuoteModal, {
+  quoteModalClosed,
+  quoteModalLoading,
+  type QuoteModalState,
+} from './SourceQuoteModal';
+import {
+  buildCitationSlots,
+  claimContextAroundCitation,
+} from '../lib/citations';
+import { resolveSourceQuote } from '../lib/nexus';
+import { getDocument } from '../data/documents';
+import { getEvent } from '../data/events';
+import { getPublication } from '../data/publications';
+import { eventDateLabel } from '../lib/corpusText';
+import type { SourceReference } from '../types';
 
 interface Props {
   conversation: Conversation | null;
-  onSend: (text: string) => void;
+  onSend: (text: string, options?: { pinnedDocIds?: string[] }) => void;
   onOpenDocument: (id: string, highlight?: string) => void;
   onToggleSave: (messageId: string) => void;
   openDocId: string | null;
@@ -56,16 +71,47 @@ export default function ChatThread({
   const messages = conversation?.messages ?? [];
   const endRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const uploadedDocs = useUploadedDocs();
+  const libraryDocs = useUploadedDocs();
+  /** Files attached in this chat only — not the full knowledge library. */
+  const [attachedIds, setAttachedIds] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
   const [dropError, setDropError] = useState<string | null>(null);
   const dragDepth = useRef(0);
+  /** Keep chips when the first send promotes a draft chat into a real conversation. */
+  const promoteAttachments = useRef(false);
+
+  useEffect(() => {
+    if (promoteAttachments.current && conversation?.id) {
+      promoteAttachments.current = false;
+      return;
+    }
+    setAttachedIds([]);
+  }, [conversation?.id]);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages.length, messages[messages.length - 1]?.pending, messages[messages.length - 1]?.content]);
 
   const isEmpty = !conversation || messages.length === 0;
+
+  const attachedDocs = attachedIds
+    .map((id) => libraryDocs.find((d) => d.id === id))
+    .filter((d): d is UploadedDoc => Boolean(d));
+
+  function addAttachments(docs: UploadedDoc[]) {
+    if (docs.length === 0) return;
+    setAttachedIds((prev) => {
+      const next = [...prev];
+      for (const d of docs) {
+        if (!next.includes(d.id)) next.push(d.id);
+      }
+      return next;
+    });
+  }
+
+  function detachAttachment(id: string) {
+    setAttachedIds((prev) => prev.filter((x) => x !== id));
+  }
 
   function resetDrag() {
     dragDepth.current = 0;
@@ -83,6 +129,7 @@ export default function ChatThread({
         if (!saved.ok && saved.error) errors.push(saved.error);
       }
     }
+    addAttachments(docs);
     if (errors.length) setDropError(errors[0]);
   }
 
@@ -91,6 +138,11 @@ export default function ChatThread({
     e.stopPropagation();
     resetDrag();
     await ingestMany(await filesFromDataTransfer(e.dataTransfer));
+  }
+
+  function handleSend(text: string) {
+    if (!conversation) promoteAttachments.current = true;
+    onSend(text, { pinnedDocIds: attachedIds });
   }
 
   return (
@@ -133,7 +185,7 @@ export default function ChatThread({
       <div ref={scrollRef} className="flex-1 overflow-y-auto chat-scroll">
         <div className={classNames('chat-column', isEmpty && 'chat-column-empty')}>
           {isEmpty ? (
-            <EmptyChat onSend={onSend} uploadedDocs={uploadedDocs} />
+            <EmptyChat onSend={handleSend} attachedDocs={attachedDocs} />
           ) : (
             <div className="chat-thread">
               {messages.map((m, i) => (
@@ -154,15 +206,20 @@ export default function ChatThread({
       <div className="chat-composer-dock shrink-0">
         <div className="chat-composer-fade" aria-hidden="true" />
         <div className="chat-column chat-composer-pad">
-          {uploadedDocs.length > 0 && (
-            <UploadedRail docs={uploadedDocs} onOpen={onOpenDocument} />
+          {attachedDocs.length > 0 && (
+            <AttachedRail
+              docs={attachedDocs}
+              onOpen={onOpenDocument}
+              onDetach={detachAttachment}
+            />
           )}
           <Composer
-            onSend={onSend}
+            onSend={handleSend}
+            onAttached={addAttachments}
             placeholder={
               isEmpty
-                ? uploadedDocs.length > 0
-                  ? 'Ask about your document…'
+                ? attachedDocs.length > 0
+                  ? 'Ask about your attached document…'
                   : 'Ask Nexus…'
                 : 'Ask a follow-up…'
             }
@@ -198,12 +255,14 @@ export default function ChatThread({
   );
 }
 
-function UploadedRail({
+function AttachedRail({
   docs,
   onOpen,
+  onDetach,
 }: {
   docs: UploadedDoc[];
   onOpen: (id: string) => void;
+  onDetach: (id: string) => void;
 }) {
   return (
     <div className="mb-3 flex gap-2 overflow-x-auto pb-0.5 scrollbar-none">
@@ -223,8 +282,8 @@ function UploadedRail({
           </button>
           <button
             type="button"
-            onClick={() => removeUploadedDoc(d.id)}
-            aria-label={`Remove ${d.filename}`}
+            onClick={() => onDetach(d.id)}
+            aria-label={`Detach ${d.filename}`}
             className="p-0.5 rounded-sm text-gray-400 hover:text-accent-red"
           >
             <X className="w-3 h-3" />
@@ -237,16 +296,18 @@ function UploadedRail({
 
 function EmptyChat({
   onSend,
-  uploadedDocs,
+  attachedDocs,
 }: {
   onSend: (q: string) => void;
-  uploadedDocs: UploadedDoc[];
+  attachedDocs: UploadedDoc[];
 }) {
-  const hasUploads = uploadedDocs.length > 0;
+  const hasUploads = attachedDocs.length > 0;
   const eventCount = eventsStore.get().length;
   const pubCount = publicationsStore.get().length;
   const libCount = documents.length;
-  const hasInstitutional = libCount > 0 || eventCount > 0 || pubCount > 0;
+  const libraryFileCount = useUploadedDocs().length;
+  const hasInstitutional =
+    libCount > 0 || eventCount > 0 || pubCount > 0 || libraryFileCount > 0;
 
   if (!hasUploads && !hasInstitutional) {
     return (
@@ -269,11 +330,11 @@ function EmptyChat({
 
   const starters = hasUploads
     ? [
-        `Summarise ${uploadedDocs[0].filename} in 5 lines`,
-        `What are the key findings in ${uploadedDocs[0].filename}?`,
-        uploadedDocs.length > 1
-          ? `Compare ${uploadedDocs[0].filename} to ${uploadedDocs[1].filename}`
-          : `What questions does ${uploadedDocs[0].filename} leave open?`,
+        `Summarise ${attachedDocs[0].filename} in 5 lines`,
+        `What are the key findings in ${attachedDocs[0].filename}?`,
+        attachedDocs.length > 1
+          ? `Compare ${attachedDocs[0].filename} to ${attachedDocs[1].filename}`
+          : `What questions does ${attachedDocs[0].filename} leave open?`,
       ]
     : [
         'What events are coming up next?',
@@ -282,8 +343,16 @@ function EmptyChat({
       ];
 
   const corpusBits = hasUploads
-    ? [`${uploadedDocs.length} upload${uploadedDocs.length === 1 ? '' : 's'}`]
+    ? [
+        `${attachedDocs.length} attached`,
+        libraryFileCount > 0
+          ? `library · ${libraryFileCount} file${libraryFileCount === 1 ? '' : 's'}`
+          : null,
+      ].filter(Boolean)
     : [
+        libraryFileCount > 0
+          ? `${libraryFileCount} library file${libraryFileCount === 1 ? '' : 's'}`
+          : null,
         eventCount > 0 ? `${eventCount} events` : null,
         pubCount > 0 ? `${pubCount} publications` : null,
         libCount > 0 ? `${libCount} docs` : null,
@@ -328,6 +397,23 @@ interface MessageBubbleProps {
   onToggleSave: (id: string) => void;
 }
 
+function sourceMeta(documentId: string): { title: string; subtitle: string } {
+  const seed = getDocument(documentId);
+  if (seed) return { title: seed.title, subtitle: `${seed.type} · ${seed.team}` };
+  const event = getEvent(documentId);
+  if (event) return { title: event.title, subtitle: `Event · ${eventDateLabel(event)}` };
+  const pub = getPublication(documentId);
+  if (pub) {
+    return {
+      title: pub.title,
+      subtitle: `Publication${pub.type ? ` · ${pub.type}` : ''}`,
+    };
+  }
+  const uploaded = getUploadedDocs().find((d) => d.id === documentId);
+  if (uploaded) return { title: uploaded.filename, subtitle: 'Library upload' };
+  return { title: 'Source', subtitle: '' };
+}
+
 function MessageBubble({
   message,
   index,
@@ -335,12 +421,88 @@ function MessageBubble({
   onToggleSave,
 }: MessageBubbleProps) {
   const [focusedSource, setFocusedSource] = useState<number | null>(null);
+  const [resolvedSources, setResolvedSources] = useState<SourceReference[]>(
+    () => message.sources ?? []
+  );
+  const [quoteModal, setQuoteModal] = useState<QuoteModalState>(quoteModalClosed());
+  const resolvingRef = useRef<Set<number>>(new Set());
   const { user } = useAuth();
 
-  function handleCitationClick(srcIndex: number) {
+  useEffect(() => {
+    setResolvedSources(message.sources ?? []);
+  }, [message.id, message.sources]);
+
+  const citationSlots = buildCitationSlots(message.content, resolvedSources);
+
+  async function requestQuote(srcIndex: number) {
     setFocusedSource(srcIndex);
-    const source = message.sources?.[srcIndex];
-    if (source) onOpenDocument(source.documentId, source.excerpt);
+    const citationNumber = srcIndex + 1;
+    const existing = citationSlots[srcIndex];
+
+    // Already have a quote — show it immediately.
+    if (existing?.excerpt?.trim() && existing.documentId) {
+      const meta = sourceMeta(existing.documentId);
+      setQuoteModal({
+        open: true,
+        citationNumber,
+        status: 'ready',
+        title: meta.title,
+        subtitle: meta.subtitle,
+        excerpt: existing.excerpt,
+        documentId: existing.documentId,
+      });
+      return;
+    }
+
+    if (resolvingRef.current.has(srcIndex)) {
+      setQuoteModal(quoteModalLoading(citationNumber));
+      return;
+    }
+
+    resolvingRef.current.add(srcIndex);
+    setQuoteModal(quoteModalLoading(citationNumber));
+
+    try {
+      const result = await resolveSourceQuote({
+        answer: message.content,
+        citationNumber,
+        claimContext: claimContextAroundCitation(message.content, citationNumber),
+        knownDocumentId: existing?.documentId || undefined,
+        uploadedDocs: getUploadedDocs(),
+      });
+      const meta = sourceMeta(result.documentId);
+      const next: SourceReference = {
+        documentId: result.documentId,
+        excerpt: result.excerpt,
+        relevanceReason: result.relevanceReason || existing?.relevanceReason || '',
+      };
+      setResolvedSources((prev) => {
+        const copy = [...prev];
+        while (copy.length <= srcIndex) {
+          copy.push({ documentId: '', excerpt: '', relevanceReason: '' });
+        }
+        copy[srcIndex] = next;
+        return copy;
+      });
+      setQuoteModal({
+        open: true,
+        citationNumber,
+        status: 'ready',
+        title: meta.title,
+        subtitle: meta.subtitle,
+        excerpt: result.excerpt,
+        documentId: result.documentId,
+      });
+    } catch (err) {
+      setQuoteModal({
+        open: true,
+        citationNumber,
+        status: 'error',
+        error: err instanceof Error ? err.message : 'Could not resolve this citation.',
+      });
+    } finally {
+      resolvingRef.current.delete(srcIndex);
+    }
   }
 
   if (message.role === 'user') {
@@ -377,17 +539,16 @@ function MessageBubble({
             <div className="prose-chat chat-answer">
               <AnswerMarkdown
                 content={message.content}
-                sources={message.sources ?? []}
-                onCitationClick={handleCitationClick}
+                sources={citationSlots}
+                onCitationClick={requestQuote}
               />
             </div>
 
-            {message.sources && message.sources.length > 0 && (
+            {citationSlots.length > 0 && (
               <SourcesPanel
-                sources={message.sources}
+                sources={citationSlots}
                 focusIndex={focusedSource}
-                onVerifyDocument={onOpenDocument}
-                onPreviewDocument={(id) => onOpenDocument(id)}
+                onRequestQuote={requestQuote}
               />
             )}
 
@@ -428,6 +589,12 @@ function MessageBubble({
           </>
         )}
       </div>
+
+      <SourceQuoteModal
+        state={quoteModal}
+        onClose={() => setQuoteModal(quoteModalClosed())}
+        onOpenDocument={onOpenDocument}
+      />
     </div>
   );
 }
