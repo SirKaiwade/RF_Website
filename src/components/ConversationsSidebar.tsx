@@ -140,7 +140,14 @@ export default function ConversationsSidebar({
             {user?.isAdmin && (
               <NavLink
                 to="/admin"
-                className={iconNavClass}
+                className={({ isActive }) =>
+                  classNames(
+                    'flex items-center justify-center w-10 h-10 rounded-md transition-colors border',
+                    isActive
+                      ? 'bg-un-blue-bg text-un-blue border-un-blue-soft shadow-card'
+                      : 'bg-surface text-un-blue border-rule shadow-card hover:border-rule-strong'
+                  )
+                }
                 title="Administrator Dashboard"
                 aria-label="Administrator Dashboard"
               >
@@ -235,7 +242,9 @@ export default function ConversationsSidebar({
             <nav className="px-2.5 pt-3 pb-1 space-y-0.5" aria-label="Administrator Dashboard">
               <NavLink
                 to="/admin"
-                className={navLinkClass}
+                className={({ isActive }) =>
+                  classNames('nav-link nav-link-admin', isActive && 'active')
+                }
                 onClick={onCloseMobile}
               >
                 <Shield className="w-4 h-4 shrink-0 nav-icon" strokeWidth={1.75} />
