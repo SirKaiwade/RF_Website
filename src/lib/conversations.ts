@@ -37,7 +37,7 @@ export function useConversations() {
     }
     let cancelled = false;
     setHydrated(false);
-    loadConversations(user.id).then((data) => {
+    loadConversations(user.id, user.email).then((data) => {
       if (!cancelled) {
         setConversations(data);
         setHydrated(true);
@@ -46,12 +46,12 @@ export function useConversations() {
     return () => {
       cancelled = true;
     };
-  }, [user?.id]);
+  }, [user?.id, user?.email]);
 
   useEffect(() => {
     if (!user || !hydrated) return;
-    void saveConversations(user.id, conversations);
-  }, [user?.id, hydrated, conversations]);
+    void saveConversations(user.id, conversations, user.email);
+  }, [user?.id, user?.email, hydrated, conversations]);
 
   const activeConversation = activeId
     ? conversations.find((c) => c.id === activeId) || null

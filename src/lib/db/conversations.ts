@@ -168,9 +168,12 @@ async function saveToSupabase(profileId: string, conversations: Conversation[]):
 }
 
 /** Load conversations — Supabase when configured, otherwise localStorage. */
-export async function loadConversations(userId: string): Promise<Conversation[]> {
+export async function loadConversations(
+  userId: string,
+  email?: string
+): Promise<Conversation[]> {
   if (supabaseConfigured()) {
-    const profileId = await getOrCreateProfileId(userId);
+    const profileId = await getOrCreateProfileId(email ?? userId);
     if (profileId) {
       const remote = await loadFromSupabase(profileId);
       if (remote) return remote;
@@ -183,11 +186,12 @@ export async function loadConversations(userId: string): Promise<Conversation[]>
 /** Persist conversations — Supabase when configured (with a local mirror), localStorage otherwise. */
 export async function saveConversations(
   userId: string,
-  conversations: Conversation[]
+  conversations: Conversation[],
+  email?: string
 ): Promise<void> {
   writeLocal(userId, conversations);
   if (!supabaseConfigured()) return;
-  const profileId = await getOrCreateProfileId(userId);
+  const profileId = await getOrCreateProfileId(email ?? userId);
   if (!profileId) return;
   await saveToSupabase(profileId, conversations);
 }

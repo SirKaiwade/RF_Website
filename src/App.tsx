@@ -10,6 +10,7 @@ const LibraryPage = lazy(() => import('./components/LibraryPage'));
 const DirectoryPage = lazy(() => import('./components/DirectoryPage'));
 const EventsPage = lazy(() => import('./components/EventsPage'));
 const PublicationsPage = lazy(() => import('./components/PublicationsPage'));
+const AdminPage = lazy(() => import('./components/AdminPage'));
 const LoginPage = lazy(() => import('./pages/LoginPage'));
 
 function RouteFallback() {
@@ -38,6 +39,7 @@ export default function App() {
             <Route path="directory" element={<DirectoryPage />} />
             <Route path="events" element={<EventsPage />} />
             <Route path="publications" element={<PublicationsPage />} />
+            <Route path="admin" element={<AdminPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>

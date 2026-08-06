@@ -211,3 +211,7 @@ create policy "publications all for service" on public.publications
   for all using (true) with check (true);
 
 -- Note: replace open policies with auth.uid()-scoped RLS before wider launch.
+
+-- Permissions (admins, bans, per-user library roles, folder viewers):
+-- Run supabase/permissions.sql in the SQL Editor after this file.
+

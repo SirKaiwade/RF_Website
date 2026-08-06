@@ -5,12 +5,20 @@ const cache = new Map<string, string>();
 /**
  * Resolve (or create) the Supabase profile row for a signed-in user's email
  * and return its uuid. Prefers the Auth user id when a session exists.
+ * Rejects values that are clearly not emails (e.g. raw auth UUIDs).
  */
 export async function getOrCreateProfileId(
   email: string,
   displayName?: string
 ): Promise<string | null> {
   const normalized = email.trim().toLowerCase();
+  if (!normalized.includes('@')) {
+    console.warn(
+      '[Nexus] getOrCreateProfileId expected an email, got:',
+      normalized.slice(0, 36)
+    );
+    return null;
+  }
   const cached = cache.get(normalized);
   if (cached) return cached;
 

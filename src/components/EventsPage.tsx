@@ -275,7 +275,7 @@ export default function EventsPage() {
               }
             />
           ) : filtered.length === 0 ? (
-            <div className="text-center text-[13px] text-gray-500 py-16 border border-dashed border-rule rounded-sm">
+            <div className="data-table-empty">
               {query.trim()
                 ? `No events match "${query}" with these filters.`
                 : timeFilter === 'upcoming'
@@ -448,7 +448,7 @@ function EventRegisterRows({
             <button
               type="button"
               onClick={onEdit}
-              className="p-1.5 rounded-sm text-gray-400 hover:text-un-blue hover:bg-un-blue-bg"
+              className="p-1.5 rounded-md text-gray-400 hover:text-un-blue hover:bg-un-blue-bg"
               title="Edit"
               aria-label={`Edit ${event.title}`}
             >
@@ -457,7 +457,7 @@ function EventRegisterRows({
             <button
               type="button"
               onClick={onDelete}
-              className="p-1.5 rounded-sm text-gray-400 hover:text-accent-red hover:bg-red-50"
+              className="p-1.5 rounded-md text-gray-400 hover:text-accent-red hover:bg-red-50"
               title="Delete"
               aria-label={`Delete ${event.title}`}
             >

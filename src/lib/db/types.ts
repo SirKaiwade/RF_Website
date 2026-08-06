@@ -14,18 +14,27 @@ export interface Database {
           id: string;
           email: string;
           display_name: string | null;
+          is_admin: boolean;
+          disabled_at: string | null;
+          disabled_reason: string | null;
           created_at: string;
         };
         Insert: {
-          id: string;
+          id?: string;
           email: string;
           display_name?: string | null;
+          is_admin?: boolean;
+          disabled_at?: string | null;
+          disabled_reason?: string | null;
           created_at?: string;
         };
         Update: {
           id?: string;
           email?: string;
           display_name?: string | null;
+          is_admin?: boolean;
+          disabled_at?: string | null;
+          disabled_reason?: string | null;
           created_at?: string;
         };
       };

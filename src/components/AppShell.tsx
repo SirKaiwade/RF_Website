@@ -7,8 +7,6 @@ import CitationRail, { type CitationRailState } from './CitationRail';
 import BrandMark from './BrandMark';
 import { useConversations } from '../lib/conversations';
 import { initLocalDataSync } from '../lib/localDataSync';
-import { loadSharedLibrary } from '../lib/db/library';
-import { hydrateSharedDocs, syncUnsharedDocsToCloud } from '../lib/uploads';
 import { supabaseConfigured } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
 import type { Conversation } from '../types/chat';
@@ -64,9 +62,33 @@ export default function AppShell() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { initLibraryStore } = await import('../lib/uploads');
+      const { initLibraryStore, pruneLibraryByAccess, hydrateSharedDocs, syncUnsharedDocsToCloud } =
+        await import('../lib/uploads');
       await initLibraryStore();
       if (cancelled) return;
+
+      const { loadSharedLibrary } = await import('../lib/db/library');
+      const { loadLibraryAccessContext, filterDocsByLibraryAccess } = await import(
+        '../lib/libraryAccess'
+      );
+      const { canReadLibraryPath } = await import('../lib/permissions');
+
+      const access = user?.email
+        ? await loadLibraryAccessContext({
+            email: user.email,
+            isAdmin: Boolean(user.isAdmin),
+            libraryRole: user.libraryRole ?? 'edit',
+            profileId: user.profileId,
+          })
+        : {
+            isAdmin: true,
+            libraryRole: 'edit' as const,
+            profileId: null,
+            viewersByPath: new Map(),
+          };
+
+      if (cancelled) return;
+
       const [dataResult, sharedDocs] = await Promise.all([
         initLocalDataSync(),
         supabaseConfigured() ? loadSharedLibrary() : Promise.resolve(null),
@@ -75,7 +97,17 @@ export default function AppShell() {
         console.info('[Nexus] Local data folder (dev only):', dataResult.path);
       }
       if (!cancelled && sharedDocs) {
-        hydrateSharedDocs(sharedDocs);
+        hydrateSharedDocs(filterDocsByLibraryAccess(sharedDocs, access));
+      }
+      if (!cancelled && !access.isAdmin) {
+        pruneLibraryByAccess((doc) =>
+          canReadLibraryPath(doc.localRelativePath, {
+            isAdmin: false,
+            libraryRole: access.libraryRole,
+            profileId: access.profileId,
+            viewersByPath: access.viewersByPath,
+          })
+        );
       }
       if (!cancelled && user?.email && supabaseConfigured()) {
         await syncUnsharedDocsToCloud(user.email);
@@ -84,7 +116,7 @@ export default function AppShell() {
     return () => {
       cancelled = true;
     };
-  }, [user?.email]);
+  }, [user?.email, user?.isAdmin, user?.libraryRole, user?.profileId]);
 
   const closeCitationRail = useCallback(() => {
     setCitationRail(null);

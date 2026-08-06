@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Home,
   MapPin,
+  Lock,
 } from 'lucide-react';
 import {
   ingestFiles,
@@ -45,8 +46,10 @@ import {
 import { formatBytes, classNames } from '../lib/format';
 import { EmptyState, MetaSummary, PageHeader, SearchField } from './ui';
 import { useAuth } from '../lib/auth';
+import { canAccessLibrary, canEditLibrary } from '../lib/permissions';
 import { supabaseConfigured } from '../lib/supabase';
 import type { ShellContext } from './AppShell';
+import FolderAccessModal from './FolderAccessModal';
 
 const ACCEPT =
   '.pdf,.docx,.xlsx,.xls,.csv,.txt,.md,.markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv,text/plain,text/markdown';
@@ -102,6 +105,14 @@ export default function LibraryPage() {
   const { user } = useAuth();
   const uploadedDocs = useUploadedDocs();
   const cloud = supabaseConfigured();
+  const canAccess = canAccessLibrary({
+    isAdmin: Boolean(user?.isAdmin),
+    libraryRole: user?.libraryRole ?? 'edit',
+  });
+  const canEdit = canEditLibrary({
+    isAdmin: Boolean(user?.isAdmin),
+    libraryRole: user?.libraryRole ?? 'edit',
+  });
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState('');
   const [dragging, setDragging] = useState(false);
@@ -113,6 +124,10 @@ export default function LibraryPage() {
   const [folderMenu, setFolderMenu] = useState<{
     x: number;
     y: number;
+    path: string;
+    name: string;
+  } | null>(null);
+  const [accessFolder, setAccessFolder] = useState<{
     path: string;
     name: string;
   } | null>(null);
@@ -221,6 +236,7 @@ export default function LibraryPage() {
   }
 
   async function ingestMany(files: File[]) {
+    if (!canEdit) return;
     if (files.length === 0) return;
     setUploading(true);
     setErrors([]);
@@ -297,8 +313,8 @@ export default function LibraryPage() {
     const norm = normalizeLibraryPath(path);
     if (!norm) return;
     // Keep the menu on-screen.
-    const menuW = 180;
-    const menuH = 72;
+    const menuW = 220;
+    const menuH = user?.isAdmin ? 120 : 72;
     const x = Math.min(e.clientX, window.innerWidth - menuW - 8);
     const y = Math.min(e.clientY, window.innerHeight - menuH - 8);
     setFolderMenu({
@@ -310,6 +326,7 @@ export default function LibraryPage() {
   }
 
   function deleteFolder(folderPath: string) {
+    if (!canEdit) return;
     const norm = normalizeLibraryPath(folderPath);
     if (!norm) return;
     const folder = getFolderAtPath(tree, norm);
@@ -347,6 +364,7 @@ export default function LibraryPage() {
   }
 
   function createFolder() {
+    if (!canEdit) return;
     const raw = window.prompt('New folder name');
     if (!raw) return;
     const name = raw.trim().replace(/[\\/]/g, '-');
@@ -364,6 +382,7 @@ export default function LibraryPage() {
   }
 
   function onDragEnter(e: React.DragEvent<HTMLElement>) {
+    if (!canEdit) return;
     if (!hasFilePayload(e)) return;
     e.preventDefault();
     e.stopPropagation();
@@ -401,6 +420,7 @@ export default function LibraryPage() {
   }
 
   function handleRemove(doc: UploadedDoc) {
+    if (!canEdit) return;
     removeUploadedDoc(doc.id);
     if (ctx.openDocId === doc.id) ctx.closeDocument();
   }
@@ -439,14 +459,16 @@ export default function LibraryPage() {
         icon={Library}
         title="Knowledge library"
         subtitle={
-          isEmpty
-            ? 'Upload a folder or files · Nexus finds where numbers and facts live'
-            : stats.folders > 0
-              ? `${stats.count} file${stats.count === 1 ? '' : 's'} in ${stats.folders} folder${stats.folders === 1 ? '' : 's'} · search by name, path, or content`
-              : `${stats.count} document${stats.count === 1 ? '' : 's'} · ready for grounded answers`
+          !canAccess
+            ? 'You don’t have access to the knowledge library'
+            : isEmpty
+              ? 'Upload a folder or files · Nexus finds where numbers and facts live'
+              : stats.folders > 0
+                ? `${stats.count} file${stats.count === 1 ? '' : 's'} in ${stats.folders} folder${stats.folders === 1 ? '' : 's'} · search by name, path, or content`
+                : `${stats.count} document${stats.count === 1 ? '' : 's'} · ready for grounded answers`
         }
         search={
-          !isEmpty ? (
+          canAccess && !isEmpty ? (
             <SearchField
               value={query}
               onChange={setQuery}
@@ -456,47 +478,62 @@ export default function LibraryPage() {
           ) : undefined
         }
         actions={
-          <div className="flex items-center gap-2">
-            {!isEmpty && (
+          !canAccess ? undefined : canEdit ? (
+            <div className="flex items-center gap-2">
+              {!isEmpty && (
+                <button
+                  type="button"
+                  onClick={createFolder}
+                  disabled={uploading}
+                  className="btn btn-secondary btn-sm"
+                  title="Create a folder in the current location"
+                >
+                  <FolderPlus className="w-3.5 h-3.5" />
+                  <span className="hidden lg:inline">New folder</span>
+                </button>
+              )}
               <button
                 type="button"
-                onClick={createFolder}
+                onClick={() => folderInputRef.current?.click()}
                 disabled={uploading}
                 className="btn btn-secondary btn-sm"
-                title="Create a folder in the current location"
+                title="Upload an entire folder tree"
               >
-                <FolderPlus className="w-3.5 h-3.5" />
-                <span className="hidden lg:inline">New folder</span>
+                <Folder className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">{uploading ? 'Adding…' : 'Upload folder'}</span>
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => folderInputRef.current?.click()}
-              disabled={uploading}
-              className="btn btn-secondary btn-sm"
-              title="Upload an entire folder tree"
-            >
-              <Folder className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{uploading ? 'Adding…' : 'Upload folder'}</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="btn btn-primary btn-sm"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              {uploading ? 'Adding…' : 'Upload files'}
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                className="btn btn-primary btn-sm"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                {uploading ? 'Adding…' : 'Upload files'}
+              </button>
+            </div>
+          ) : (
+            <span className="chip chip-gray">Read only</span>
+          )
         }
       />
 
       <div className="flex-1 overflow-hidden flex min-h-0">
-        {isEmpty ? (
+        {!canAccess ? (
+          <div className="flex-1 overflow-y-auto">
+            <div className="max-w-lg mx-auto px-5 py-16">
+              <EmptyState
+                icon={Lock}
+                title="No library access"
+                description="An administrator hasn’t given you access to the knowledge library yet. Contact them if you need to view or upload documents."
+              />
+            </div>
+          </div>
+        ) : isEmpty ? (
           <div className="flex-1 overflow-y-auto">
             <div className="max-w-5xl mx-auto px-5 lg:px-8 py-6 lg:py-10">
               <EmptyLibrary
+                readOnly={!canEdit}
                 onPickFiles={() => fileInputRef.current?.click()}
                 onPickFolder={() => folderInputRef.current?.click()}
                 onDragOver={onDragOver}
@@ -513,9 +550,15 @@ export default function LibraryPage() {
                 </span>
                 <span
                   className="text-[10px] text-gray-400 truncate"
-                  title="Right-click a folder to delete it"
+                  title={
+                    user?.isAdmin
+                      ? 'Right-click a folder to manage access or delete it'
+                      : canEdit
+                        ? 'Right-click a folder to delete it'
+                        : 'Browse folders'
+                  }
                 >
-                  right-click to delete
+                  {user?.isAdmin ? 'right-click to manage' : canEdit ? 'right-click to delete' : ''}
                 </span>
               </div>
               <nav className="flex-1 overflow-y-auto py-2 px-1.5" aria-label="Folder tree">
@@ -630,7 +673,7 @@ export default function LibraryPage() {
 
                       {currentFolder.folders.length === 0 &&
                       currentFolder.files.length === 0 ? (
-                        <div className="text-center text-[13px] text-gray-500 py-14 border border-dashed border-rule rounded-sm">
+                        <div className="data-table-empty">
                           This folder is empty. Upload files or a subfolder here.
                         </div>
                       ) : (
@@ -685,6 +728,7 @@ export default function LibraryPage() {
                               doc={doc}
                               active={ctx.openDocId === doc.id}
                               highlighted={highlightFileId === doc.id}
+                              canRemove={canEdit}
                               onOpen={() => {
                                 flashHighlight(doc.id);
                                 ctx.openDocument(doc.id);
@@ -725,20 +769,44 @@ export default function LibraryPage() {
             <div className="lib-ctx-menu-label" title={folderMenu.path}>
               {folderMenu.name}
             </div>
-            <button
-              type="button"
-              role="menuitem"
-              className="lib-ctx-menu-item lib-ctx-menu-danger"
-              onClick={() => deleteFolder(folderMenu.path)}
-            >
-              <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
-              Delete folder
-            </button>
+            {user?.isAdmin && (
+              <button
+                type="button"
+                role="menuitem"
+                className="lib-ctx-menu-item"
+                onClick={() => {
+                  setAccessFolder({ path: folderMenu.path, name: folderMenu.name });
+                  setFolderMenu(null);
+                }}
+              >
+                <Lock className="w-3.5 h-3.5" strokeWidth={1.75} />
+                Manage who can see this
+              </button>
+            )}
+            {canEdit && (
+              <button
+                type="button"
+                role="menuitem"
+                className="lib-ctx-menu-item lib-ctx-menu-danger"
+                onClick={() => deleteFolder(folderMenu.path)}
+              >
+                <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+                Delete folder
+              </button>
+            )}
           </div>,
           document.body
         )}
 
-      {dragging && (
+      {accessFolder && user?.isAdmin && (
+        <FolderAccessModal
+          folderPath={accessFolder.path}
+          folderName={accessFolder.name}
+          onClose={() => setAccessFolder(null)}
+        />
+      )}
+
+      {dragging && canEdit && (
         <div
           className="absolute inset-0 z-40 bg-un-blue-bg/96 border-2 border-dashed border-un-blue m-3 rounded-sm flex items-center justify-center fade-in"
           onDragOver={onDragOver}
@@ -939,7 +1007,7 @@ function SearchResults({
       </div>
 
       {hits.length === 0 ? (
-        <div className="text-center text-[13px] text-gray-500 py-14 border border-dashed border-rule rounded-sm">
+        <div className="data-table-empty">
           Nothing matched &ldquo;{query}&rdquo; in filenames, folder paths, or document text.
         </div>
       ) : (
@@ -1005,6 +1073,7 @@ function FileRow({
   doc,
   active,
   highlighted,
+  canRemove = true,
   onOpen,
   onRemove,
   rowRef,
@@ -1012,6 +1081,7 @@ function FileRow({
   doc: UploadedDoc;
   active: boolean;
   highlighted: boolean;
+  canRemove?: boolean;
   onOpen: () => void;
   onRemove: () => void;
   rowRef: (el: HTMLElement | null) => void;
@@ -1056,67 +1126,85 @@ function FileRow({
           {kindLabel(kind)}
         </span>
       </button>
-      <button
-        type="button"
-        onClick={onRemove}
-        aria-label={`Remove ${name}`}
-        title="Remove"
-        className="p-1.5 rounded-sm text-gray-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-accent-red hover:bg-red-50 transition-opacity shrink-0"
-      >
-        <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
-      </button>
+      {canRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`Remove ${name}`}
+          title="Remove"
+          className="p-1.5 rounded-sm text-gray-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-accent-red hover:bg-red-50 transition-opacity shrink-0"
+        >
+          <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+        </button>
+      )}
     </div>
   );
 }
 
 function EmptyLibrary({
+  readOnly = false,
   onPickFiles,
   onPickFolder,
   onDragOver,
   onDrop,
 }: {
+  readOnly?: boolean;
   onPickFiles: () => void;
   onPickFolder: () => void;
   onDragOver: (e: React.DragEvent<HTMLElement>) => void;
   onDrop: (e: React.DragEvent<HTMLElement>) => void;
 }) {
   return (
-    <div className="fade-in" onDragOver={onDragOver} onDrop={onDrop}>
+    <div
+      className="fade-in"
+      onDragOver={readOnly ? undefined : onDragOver}
+      onDrop={readOnly ? undefined : onDrop}
+    >
       <EmptyState
         icon={Library}
-        title="Build your knowledge base"
-        description="Upload an entire folder system — reports, briefs, spreadsheets — and keep the structure. Search or ask Nexus where something lives; you'll get a link to the exact folder with the file highlighted."
+        title={readOnly ? 'Library is empty' : 'Build your knowledge base'}
+        description={
+          readOnly
+            ? 'Nothing is in the knowledge library yet. Someone with edit access needs to upload documents first.'
+            : 'Upload an entire folder system — reports, briefs, spreadsheets — and keep the structure. Search or ask Nexus where something lives; you’ll get a link to the exact folder with the file highlighted.'
+        }
         action={
-          <div className="flex flex-wrap items-center justify-center gap-2">
-            <button type="button" onClick={onPickFolder} className="btn btn-primary">
-              <FolderPlus className="w-4 h-4" />
-              Upload a folder
-            </button>
-            <button type="button" onClick={onPickFiles} className="btn btn-secondary">
-              <Upload className="w-4 h-4" />
-              Upload files
-            </button>
-          </div>
+          readOnly ? undefined : (
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <button type="button" onClick={onPickFolder} className="btn btn-primary">
+                <FolderPlus className="w-4 h-4" />
+                Upload a folder
+              </button>
+              <button type="button" onClick={onPickFiles} className="btn btn-secondary">
+                <Upload className="w-4 h-4" />
+                Upload files
+              </button>
+            </div>
+          )
         }
       >
-        <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-lg text-left">
-          {[
-            { label: 'Keep your folders', hint: 'Paths stay intact' },
-            { label: 'Find by location', hint: '“Where are the numbers?”' },
-            { label: 'Jump & highlight', hint: 'Deep-link to the file' },
-          ].map((item) => (
-            <div
-              key={item.label}
-              className="rounded-sm border border-rule bg-surface/80 px-3.5 py-3"
-            >
-              <div className="text-[12px] font-semibold text-ink">{item.label}</div>
-              <div className="text-[11px] text-gray-500 mt-0.5">{item.hint}</div>
+        {!readOnly && (
+          <>
+            <div className="mt-8 grid grid-cols-1 sm:grid-cols-3 gap-3 w-full max-w-lg text-left">
+              {[
+                { label: 'Keep your folders', hint: 'Paths stay intact' },
+                { label: 'Find by location', hint: '“Where are the numbers?”' },
+                { label: 'Jump & highlight', hint: 'Deep-link to the file' },
+              ].map((item) => (
+                <div
+                  key={item.label}
+                  className="rounded-sm border border-rule bg-surface/80 px-3.5 py-3"
+                >
+                  <div className="text-[12px] font-semibold text-ink">{item.label}</div>
+                  <div className="text-[11px] text-gray-500 mt-0.5">{item.hint}</div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-        <p className="mt-6 text-[12px] text-gray-500">
-          Or drag a folder anywhere onto this page.
-        </p>
+            <p className="mt-6 text-[12px] text-gray-500">
+              Or drag a folder anywhere onto this page.
+            </p>
+          </>
+        )}
       </EmptyState>
     </div>
   );

@@ -231,14 +231,14 @@ export default function PublicationsPage() {
               action={<SpreadsheetImport kind="publications" />}
             />
           ) : filtered.length === 0 ? (
-            <div className="text-center text-[13px] text-gray-500 py-16 border border-dashed border-rule rounded-sm">
+            <div className="data-table-empty">
               {query.trim()
                 ? `No publications match "${query}" with these filters.`
                 : 'No publications match these filters.'}
             </div>
           ) : (
-            <div className="border border-rule rounded-sm bg-surface overflow-hidden">
-              <div className="overflow-x-auto">
+            <div className="data-register">
+              <div className="data-register-scroll">
                 <table className="data-table">
                   <thead>
                     <tr>
@@ -280,10 +280,10 @@ export default function PublicationsPage() {
 
 function PublicationTypeKey() {
   return (
-    <details className="publication-type-key group border border-rule rounded-sm bg-surface">
-      <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer list-none select-none hover:bg-gray-50">
+    <details className="publication-type-key group border border-rule rounded-lg bg-surface mb-4">
+      <summary className="flex items-center justify-between gap-3 px-4 py-3 cursor-pointer list-none select-none hover:bg-surface-subtle rounded-lg">
         <div className="min-w-0">
-          <div className="text-[12px] font-semibold text-ink tracking-wide uppercase">
+          <div className="text-[13px] font-semibold text-ink">
             Publication type key
           </div>
           <div className="text-[12px] text-gray-500 mt-0.5">
@@ -380,7 +380,7 @@ function PublicationRegisterRows({
                 href={href}
                 target="_blank"
                 rel="noreferrer"
-                className="p-1.5 rounded-sm text-gray-400 hover:text-un-blue hover:bg-un-blue-bg"
+                className="p-1.5 rounded-md text-gray-400 hover:text-un-blue hover:bg-un-blue-bg"
                 title="Open link"
                 aria-label={`Open link for ${p.title}`}
               >
@@ -390,7 +390,7 @@ function PublicationRegisterRows({
             <button
               type="button"
               onClick={onDelete}
-              className="p-1.5 rounded-sm text-gray-400 hover:text-accent-red hover:bg-red-50"
+              className="p-1.5 rounded-md text-gray-400 hover:text-accent-red hover:bg-red-50"
               title="Delete"
               aria-label={`Delete ${p.title}`}
             >

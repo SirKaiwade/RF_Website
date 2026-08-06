@@ -119,7 +119,7 @@ export function SearchField({
   return (
     <div className={classNames('relative w-full max-w-xs', className)}>
       <Search
-        className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none"
+        className="absolute left-3.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 pointer-events-none"
         strokeWidth={1.75}
       />
       <input
@@ -127,7 +127,10 @@ export function SearchField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder ?? 'Search…'}
-        className={classNames('input pl-8 w-full', compact ? 'py-1.5 text-body-s' : 'text-body-m')}
+        className={classNames(
+          'input input-search w-full',
+          compact ? 'py-1.5 text-body-s' : 'text-body-m'
+        )}
       />
     </div>
   );
@@ -294,7 +297,7 @@ export function CopyButton({
       title={copied ? 'Copied' : label}
       aria-label={copied ? 'Copied' : label}
       className={classNames(
-        'inline-flex items-center justify-center p-1 rounded-sm text-gray-400 hover:text-un-blue hover:bg-un-blue-bg transition-colors',
+        'inline-flex items-center justify-center p-1 rounded-md text-gray-400 hover:text-un-blue hover:bg-un-blue-bg transition-colors',
         copied && 'text-accent-green hover:text-accent-green'
       )}
     >

@@ -152,6 +152,15 @@ export function getUploadedDocs(): UploadedDoc[] {
   return store;
 }
 
+/** Drop docs the current user is not allowed to see (non-admins only). */
+export function pruneLibraryByAccess(canRead: (doc: UploadedDoc) => boolean): void {
+  const next = store.filter(canRead);
+  if (next.length === store.length) return;
+  store = next;
+  persistAllAsync();
+  notify();
+}
+
 /** @deprecated No longer used — library size is unbounded; Nexus retrieves per question. */
 export function totalUploadedChars(): number {
   return store.reduce((sum, d) => sum + d.charCount, 0);

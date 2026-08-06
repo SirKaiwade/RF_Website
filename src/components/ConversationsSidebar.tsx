@@ -12,6 +12,7 @@ import {
   Moon,
   PanelLeftClose,
   PanelLeftOpen,
+  Shield,
 } from 'lucide-react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import BrandMark from './BrandMark';
@@ -81,10 +82,10 @@ export default function ConversationsSidebar({
 
   const iconNavClass = ({ isActive }: { isActive: boolean }) =>
     classNames(
-      'flex items-center justify-center w-10 h-10 rounded-sm transition-colors',
+      'flex items-center justify-center w-10 h-10 rounded-md transition-colors border border-transparent',
       isActive
-        ? 'bg-un-blue-bg text-un-blue'
-        : 'text-gray-500 hover:text-ink hover:bg-surface'
+        ? 'bg-surface text-un-blue border-rule shadow-card'
+        : 'text-gray-500 hover:text-ink hover:bg-surface/70'
     );
 
   return (
@@ -121,7 +122,7 @@ export default function ConversationsSidebar({
               onClick={onToggleCollapsed}
               aria-label="Expand sidebar"
               title="Expand sidebar"
-              className="p-2 rounded-sm text-gray-400 hover:text-ink hover:bg-surface"
+              className="p-2 rounded-md text-gray-400 hover:text-ink hover:bg-surface"
             >
               <PanelLeftOpen className="w-4 h-4" strokeWidth={1.75} />
             </button>
@@ -136,6 +137,16 @@ export default function ConversationsSidebar({
           </div>
 
           <nav className="flex-1 flex flex-col items-center gap-1 py-3" aria-label="Primary">
+            {user?.isAdmin && (
+              <NavLink
+                to="/admin"
+                className={iconNavClass}
+                title="Administrator Dashboard"
+                aria-label="Administrator Dashboard"
+              >
+                <Shield className="w-4 h-4" strokeWidth={1.75} />
+              </NavLink>
+            )}
             {NAV_ITEMS.map((item) => {
               const Icon = item.icon;
               return (
@@ -156,7 +167,7 @@ export default function ConversationsSidebar({
               onClick={handleNewChat}
               title="New chat"
               aria-label="New chat"
-              className="mt-2 flex items-center justify-center w-10 h-10 rounded-sm bg-un-blue text-white hover:bg-un-blue-dark"
+              className="mt-2 flex items-center justify-center w-10 h-10 rounded-md bg-un-blue text-white hover:bg-un-blue-dark"
             >
               <Plus className="w-4 h-4" strokeWidth={2} />
             </button>
@@ -168,7 +179,7 @@ export default function ConversationsSidebar({
               onClick={toggleTheme}
               aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
               title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-              className="p-2 rounded-sm text-gray-400 hover:text-ink hover:bg-surface"
+              className="p-2 rounded-md text-gray-400 hover:text-ink hover:bg-surface"
             >
               {theme === 'dark' ? (
                 <Sun className="w-3.5 h-3.5" strokeWidth={1.75} />
@@ -205,7 +216,7 @@ export default function ConversationsSidebar({
                 onClick={onToggleCollapsed}
                 aria-label="Collapse sidebar"
                 title="Collapse sidebar"
-                className="hidden md:inline-flex p-1.5 rounded-sm text-gray-400 hover:text-ink hover:bg-surface"
+                className="hidden md:inline-flex p-1.5 rounded-md text-gray-400 hover:text-ink hover:bg-surface"
               >
                 <PanelLeftClose className="w-4 h-4" strokeWidth={1.75} />
               </button>
@@ -213,14 +224,27 @@ export default function ConversationsSidebar({
                 type="button"
                 onClick={onCloseMobile}
                 aria-label="Close menu"
-                className="md:hidden p-1.5 -mr-1.5 rounded-sm text-gray-400 hover:text-ink hover:bg-surface"
+                className="md:hidden p-1.5 -mr-1.5 rounded-md text-gray-400 hover:text-ink hover:bg-surface"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
           </div>
 
-          <div className="px-3 pt-4 pb-1 text-overline uppercase font-semibold text-gray-500 tracking-[0.08em]">
+          {user?.isAdmin && (
+            <nav className="px-2.5 pt-3 pb-1 space-y-0.5" aria-label="Administrator Dashboard">
+              <NavLink
+                to="/admin"
+                className={navLinkClass}
+                onClick={onCloseMobile}
+              >
+                <Shield className="w-4 h-4 shrink-0 nav-icon" strokeWidth={1.75} />
+                Administrator Dashboard
+              </NavLink>
+            </nav>
+          )}
+
+          <div className="px-3 pt-3 pb-1 text-overline uppercase font-semibold text-gray-500 tracking-[0.08em]">
             Workspace
           </div>
           <nav className="px-2.5 pb-2 space-y-0.5" aria-label="Primary">
@@ -266,10 +290,10 @@ export default function ConversationsSidebar({
                         type="button"
                         onClick={() => handleOpenConversation(c.id)}
                         className={classNames(
-                          'w-full text-left flex items-start gap-2 px-2.5 py-2 rounded-sm transition-colors duration-150',
+                          'w-full text-left flex items-start gap-2 px-2.5 py-2 rounded-md transition-all duration-150 border border-transparent',
                           active
-                            ? 'bg-un-blue-bg text-un-blue-text'
-                            : 'hover:bg-surface text-gray-700'
+                            ? 'bg-surface text-ink border-rule shadow-card'
+                            : 'hover:bg-surface/70 text-gray-700'
                         )}
                       >
                         <MessageSquare
@@ -295,7 +319,7 @@ export default function ConversationsSidebar({
                           onDelete(c.id);
                         }}
                         aria-label="Delete conversation"
-                        className="absolute right-1.5 top-1.5 p-1 rounded-sm opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:bg-surface text-gray-400 hover:text-accent-red"
+                        className="absolute right-1.5 top-1.5 p-1 rounded-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:bg-surface text-gray-400 hover:text-accent-red"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -325,7 +349,7 @@ export default function ConversationsSidebar({
                 onClick={toggleTheme}
                 aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
                 title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-                className="p-1.5 rounded-sm text-gray-400 hover:text-ink hover:bg-gray-100 shrink-0"
+                className="p-1.5 rounded-md text-gray-400 hover:text-ink hover:bg-gray-100 shrink-0"
               >
                 {theme === 'dark' ? (
                   <Sun className="w-3.5 h-3.5" strokeWidth={1.75} />
@@ -337,7 +361,7 @@ export default function ConversationsSidebar({
                 type="button"
                 onClick={handleSignOut}
                 aria-label="Sign out"
-                className="p-1.5 rounded-sm text-gray-400 hover:text-ink hover:bg-gray-100 shrink-0"
+                className="p-1.5 rounded-md text-gray-400 hover:text-ink hover:bg-gray-100 shrink-0"
               >
                 <LogOut className="w-3.5 h-3.5" strokeWidth={1.75} />
               </button>
